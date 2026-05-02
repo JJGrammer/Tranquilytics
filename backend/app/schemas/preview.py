@@ -15,5 +15,7 @@ class PreviewResponse(BaseModel):
     exchange: str | None = None
     currency: str | None = None
     risk_level: str = Field(default="Moderate")
+    sentiment_label: str = Field(default="Neutral", description="Aggregate headline tilt")
+    sentiment_headlines_used: int = Field(default=0, ge=0)
     short_term: HorizonPreview | None = None
     long_term: HorizonPreview | None = None

@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.health import router as health_router
+from app.routers.market import router as market_router
 from app.routers.report import router as report_router
 from app.routers.ticker import router as ticker_router
 
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(ticker_router, prefix="/ticker", tags=["ticker"])
     app.include_router(report_router, prefix="/report", tags=["report"])
+    app.include_router(market_router, prefix="/market", tags=["market"])
 
     return app
 

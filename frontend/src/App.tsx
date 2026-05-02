@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { DailyLeaderRow } from './types'
 import {
+  fetchDailyLeaders,
   generateReport,
   previewTicker,
   validateTicker,
@@ -55,6 +56,10 @@ export default function App() {
   const [shortTone, setShortTone] = useState<string | null>(null)
   const [longTone, setLongTone] = useState<string | null>(null)
   const [riskPreview, setRiskPreview] = useState<string | null>(null)
+  const [sentPreview, setSentPreview] = useState<{
+    label: string
+    count: number
+  } | null>(null)
   const [previewConf, setPreviewConf] = useState<{
     short: number
     long: number
@@ -67,9 +72,39 @@ export default function App() {
   const [loadingReport, setLoadingReport] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [leadersLoading, setLeadersLoading] = useState(false)
+  const [dailyLeaders, setDailyLeaders] = useState<DailyLeaderRow[]>([])
+  const quickCloseTimer = useRef<number | null>(null)
+
+  const cancelQuickClose = useCallback(() => {
+    if (quickCloseTimer.current != null) {
+      window.clearTimeout(quickCloseTimer.current)
+      quickCloseTimer.current = null
+    }
+  }, [])
+
+  useEffect(() => () => cancelQuickClose(), [cancelQuickClose])
+
+  const scheduleQuickClose = useCallback(() => {
+    cancelQuickClose()
+    quickCloseTimer.current = window.setTimeout(() => setQuickOpen(false), 150)
+  }, [cancelQuickClose])
+
+  const loadDailyLeaders = useCallback(async () => {
+    setLeadersLoading(true)
+    try {
+      const res = await fetchDailyLeaders(5)
+      setDailyLeaders(res.leaders ?? [])
+    } catch {
+      setDailyLeaders([])
+    } finally {
+      setLeadersLoading(false)
+    }
+  }, [])
+
   const lookup = useCallback(
-    async (raw: string, e?: FormEvent) => {
-      e?.preventDefault()
+    async (raw: string) => {
       const sym = raw.trim().toUpperCase()
       if (!sym) {
         setErrorMsg('Enter a ticker symbol.')
@@ -79,6 +114,7 @@ export default function App() {
       setLoadingSearch(true)
       setReport(null)
       setPreviewConf(null)
+      setSentPreview(null)
 
       try {
         const validated = await validateTicker(sym)
@@ -89,6 +125,7 @@ export default function App() {
           setLongTone(null)
           setRiskPreview(null)
           setScaleHighlight(null)
+          setSentPreview(null)
           setErrorMsg(`No ticker found for “${sym}”.`)
           setLoadingSearch(false)
           return
@@ -103,6 +140,7 @@ export default function App() {
           setLongTone(null)
           setRiskPreview(null)
           setScaleHighlight(null)
+          setSentPreview(null)
           setErrorMsg('Unable to load a preview for that symbol.')
           setLoadingSearch(false)
           return
@@ -116,6 +154,10 @@ export default function App() {
           long: preview.long_term.confidence,
         })
         setScaleHighlight(preview.short_term.tone)
+        setSentPreview({
+          label: preview.sentiment_label,
+          count: preview.sentiment_headlines_used,
+        })
         setCompanyName((n) => n ?? preview.name ?? null)
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : 'Search failed.')
@@ -125,6 +167,16 @@ export default function App() {
       }
     },
     [],
+  )
+
+  const pickQuickSymbol = useCallback(
+    async (sym: string) => {
+      cancelQuickClose()
+      setQuickOpen(false)
+      setSymbolInput(sym)
+      await lookup(sym)
+    },
+    [lookup, cancelQuickClose],
   )
 
   const onGenerateAnalysis = useCallback(async () => {
@@ -155,28 +207,100 @@ export default function App() {
           Stress-free insights
         </h1>
         <p className="mt-2 max-w-xl text-sm text-slate-400">
-          Signals are modeled from recent price patterns—not a substitute for research.
-          Educational use only.
+          Signals are modeled from recent price patterns—not financial advice, use at your own discretion.
         </p>
 
         <form
           className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-end"
-          onSubmit={(e) => lookup(symbolInput, e)}
+          onSubmit={(e) => {
+            e.preventDefault()
+            cancelQuickClose()
+            setQuickOpen(false)
+            void lookup(symbolInput)
+          }}
           role="search"
         >
-          <label className="block flex-1 text-left">
-            <span className="text-xs text-slate-500">Ticker</span>
-            <input
-              type="text"
-              autoCapitalize="characters"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="e.g. AAPL"
-              value={symbolInput}
-              onChange={(e) => setSymbolInput(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-2.5 text-white placeholder:text-slate-600 focus:border-cyan-600 focus:outline-none focus:ring-1 focus:ring-cyan-600"
-            />
-          </label>
+          <div className="relative flex-1 text-left">
+            <label htmlFor="ticker-search" className="block">
+              <span className="text-xs text-slate-500">Ticker</span>
+              <input
+                id="ticker-search"
+                type="text"
+                autoCapitalize="characters"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="e.g. AAPL"
+                value={symbolInput}
+                onChange={(e) => setSymbolInput(e.target.value)}
+                onFocus={() => {
+                  cancelQuickClose()
+                  setQuickOpen(true)
+                  void loadDailyLeaders()
+                }}
+                onBlur={() => scheduleQuickClose()}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-2.5 text-white placeholder:text-slate-600 focus:border-cyan-600 focus:outline-none focus:ring-1 focus:ring-cyan-600"
+              />
+            </label>
+
+            {quickOpen ? (
+              <div
+                className="absolute left-0 right-0 top-full z-50 -mt-px max-h-80 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 py-2 shadow-xl shadow-black/40 ring-1 ring-slate-600/60"
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={cancelQuickClose}
+              >
+                <p className="border-b border-slate-800 px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Today&apos;s top movers · curated large caps
+                </p>
+                {leadersLoading && dailyLeaders.length === 0 ? (
+                  <p className="px-3 py-3 text-sm text-slate-500">Loading…</p>
+                ) : dailyLeaders.length === 0 ? (
+                  <p className="px-3 py-3 text-sm text-slate-500">
+                    Movers unavailable — type a symbol instead.
+                  </p>
+                ) : (
+                  <ul className="mt-1">
+                    {dailyLeaders.map((row) => (
+                      <li key={row.symbol}>
+                        <button
+                          type="button"
+                          className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-slate-800/80"
+                          onClick={() => void pickQuickSymbol(row.symbol)}
+                        >
+                          <div className="flex flex-wrap items-baseline gap-2">
+                            <span className="font-semibold text-cyan-300">
+                              {row.symbol}
+                            </span>
+                            <span className="text-[11px] text-slate-500">
+                              {row.name ?? '—'} ·{' '}
+                              <span
+                                className={
+                                  row.change_pct_day >= 0
+                                    ? 'text-emerald-400'
+                                    : 'text-rose-400'
+                                }
+                              >
+                                {row.change_pct_day >= 0 ? '+' : ''}
+                                {row.change_pct_day.toFixed(2)}% day
+                              </span>
+                            </span>
+                          </div>
+                          {row.description ? (
+                            <p className="line-clamp-2 text-xs text-slate-500">
+                              {row.description}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-slate-600 italic">
+                              No company summary from data provider right now.
+                            </p>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </div>
           <button
             type="submit"
             disabled={loadingSearch}
@@ -185,6 +309,41 @@ export default function App() {
             {loadingSearch ? 'Looking up…' : 'Look up'}
           </button>
         </form>
+
+        <div
+          className="mt-5 rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-3"
+          aria-label="Outlook scale legend"
+        >
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Outlook scale
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {TONES_ORDER.map((t) => (
+                <span
+                  key={t}
+                  className={`${toneBadgeClass(t)} transition ${
+                    scaleHighlight === t
+                      ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900'
+                      : ''
+                  }`}
+                  title={
+                    scaleHighlight === t
+                      ? 'Matches current short-term tone after lookup'
+                      : undefined
+                  }
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+          <p className="mt-2 border-t border-slate-800/60 pt-2 text-xs text-slate-600">
+            These labels describe modeled tilt—not instructions. After a successful lookup, the{' '}
+            <span className="text-slate-500">cyan ring</span> marks{' '}
+            <span className="text-slate-400">short-term</span> tone (long-term can differ).
+          </p>
+        </div>
       </header>
 
       {errorMsg ? (
@@ -204,26 +363,6 @@ export default function App() {
               <span className="text-sm text-slate-500">{companyName}</span>
             ) : null}
           </div>
-
-          <p className="mt-4 text-xs text-slate-500">Outlook scale</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {TONES_ORDER.map((t) => (
-              <span
-                key={t}
-                className={`${toneBadgeClass(t)} transition ${
-                  scaleHighlight === t
-                    ? 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-slate-900'
-                    : ''
-                }`}
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-slate-600">
-            Highlight follows the short-term tone after lookup (long-term differs when
-            models diverge).
-          </p>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
             <div>
@@ -252,6 +391,17 @@ export default function App() {
             </div>
           </div>
 
+          {sentPreview ? (
+            <p className="mt-4 text-sm text-slate-400">
+              <span className="text-slate-500">Headline sentiment (preview): </span>
+              <span className="font-medium text-slate-200">{sentPreview.label}</span>
+              {sentPreview.count > 0
+                ? ` — ${sentPreview.count} headline(s) scored and blended into tones with technical signals`
+                : ' — no headlines returned; blended as neutral headline layer'}
+              .
+            </p>
+          ) : null}
+
           <button
             type="button"
             onClick={() => void onGenerateAnalysis()}
@@ -270,6 +420,14 @@ export default function App() {
             {report.disclaimer}
           </p>
           <p className="mt-4 text-slate-300">{report.summary}</p>
+          <p className="mt-3 text-sm text-slate-500">
+            Aggregate headline tilt:{' '}
+            <span className="text-slate-300">{report.sentiment_label}</span>
+            {' · '}
+            {report.sentiment_headlines_used > 0
+              ? `${report.sentiment_headlines_used} headline(s) in blend`
+              : 'no headline text (neutral in blend)'}
+          </p>
 
           <div className="mt-6 grid gap-6 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-700/80 bg-slate-950/40 p-4">
@@ -282,6 +440,29 @@ export default function App() {
                   ~{report.short_term.window_trading_days} sessions
                 </span>
               </p>
+              <div className="mt-3 rounded-md border border-slate-700/70 bg-slate-950/50 p-3 text-xs text-slate-400">
+                <p className="font-medium text-slate-300">Technical + sentiment synthesizer</p>
+                <ul className="mt-2 list-inside list-disc space-y-0.5 marker:text-slate-600">
+                  <li>
+                    Technical model P(up) ≈{' '}
+                    {(report.short_term.synthesis.technical_probability * 100).toFixed(1)}%
+                  </li>
+                  <li>
+                    Headline layer P(up) ≈{' '}
+                    {(report.short_term.synthesis.sentiment_probability * 100).toFixed(1)}%
+                  </li>
+                  <li>
+                    Blended P(up) ≈{' '}
+                    {(report.short_term.synthesis.blended_probability * 100).toFixed(1)}%
+                    {' '}
+                    <span className="text-slate-600">
+                      (weights {(report.short_term.synthesis.technical_weight * 100).toFixed(0)}%
+                      technical / {(report.short_term.synthesis.sentiment_weight * 100).toFixed(0)}%
+                      headlines)
+                    </span>
+                  </li>
+                </ul>
+              </div>
               <p className="mt-3 text-sm leading-relaxed text-slate-400">
                 {report.short_term.reasoning}
               </p>
@@ -296,6 +477,29 @@ export default function App() {
                   ~{report.long_term.window_trading_days} sessions
                 </span>
               </p>
+              <div className="mt-3 rounded-md border border-slate-700/70 bg-slate-950/50 p-3 text-xs text-slate-400">
+                <p className="font-medium text-slate-300">Technical + sentiment synthesizer</p>
+                <ul className="mt-2 list-inside list-disc space-y-0.5 marker:text-slate-600">
+                  <li>
+                    Technical model P(up) ≈{' '}
+                    {(report.long_term.synthesis.technical_probability * 100).toFixed(1)}%
+                  </li>
+                  <li>
+                    Headline layer P(up) ≈{' '}
+                    {(report.long_term.synthesis.sentiment_probability * 100).toFixed(1)}%
+                  </li>
+                  <li>
+                    Blended P(up) ≈{' '}
+                    {(report.long_term.synthesis.blended_probability * 100).toFixed(1)}%
+                    {' '}
+                    <span className="text-slate-600">
+                      (weights {(report.long_term.synthesis.technical_weight * 100).toFixed(0)}%
+                      technical / {(report.long_term.synthesis.sentiment_weight * 100).toFixed(0)}%
+                      headlines)
+                    </span>
+                  </li>
+                </ul>
+              </div>
               <p className="mt-3 text-sm leading-relaxed text-slate-400">
                 {report.long_term.reasoning}
               </p>

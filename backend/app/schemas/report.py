@@ -11,14 +11,25 @@ class Citation(BaseModel):
     as_of: datetime | None = None
 
 
+class HorizonSynthesis(BaseModel):
+    """How the synthesizer blended technical probability with headline sentiment."""
+
+    technical_probability: float = Field(ge=0.0, le=1.0)
+    sentiment_probability: float = Field(ge=0.0, le=1.0)
+    blended_probability: float = Field(ge=0.0, le=1.0)
+    technical_weight: float = Field(ge=0.0, le=1.0)
+    sentiment_weight: float = Field(ge=0.0, le=1.0)
+
+
 class HorizonAdvice(BaseModel):
     horizon: str = Field(description="short or long")
     window_trading_days: int
     tone: str = Field(description="Safer Buy | Buy | Neutral | Sell | Sell Soon")
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str = Field(default="", description="Plain-language rationale for this horizon")
+    synthesis: HorizonSynthesis
     expected_return: float | None = Field(
-        default=None, description="Model-estimated directional bias over horizon"
+        default=None, description="Model-estimated directional bias over horizon (sentiment-nudged)"
     )
     volatility: float | None = Field(default=None, description="Estimated daily volatility")
 
@@ -38,6 +49,9 @@ class ReportResponse(BaseModel):
     as_of: datetime | None = None
 
     risk_level: str = Field(description="Low | Moderate | High")
+
+    sentiment_label: str = Field(description="Bullish | Bearish | Neutral (headlines)")
+    sentiment_headlines_used: int = Field(ge=0)
 
     short_term: HorizonAdvice
     long_term: HorizonAdvice

@@ -89,3 +89,31 @@ class MarketDataService:
         as_of = ts.to_pydatetime().replace(tzinfo=timezone.utc) if ts is not pd.NaT else None
         return df, as_of
 
+    def get_news_items(self, symbol: str, limit: int = 24) -> list[dict]:
+        """Recent headlines via yfinance (titles used for VADER sentiment)."""
+        try:
+            t = yf.Ticker(symbol)
+            raw = getattr(t, "news", None) or []
+            out: list[dict] = []
+            for n in raw[:limit]:
+                title = (n.get("title") or "").strip()
+                if not title:
+                    continue
+                pub = n.get("providerPublishTime")
+                as_of = (
+                    datetime.fromtimestamp(int(pub), tz=timezone.utc)
+                    if isinstance(pub, (int, float))
+                    else None
+                )
+                out.append(
+                    {
+                        "title": title,
+                        "publisher": n.get("publisher") or "unknown",
+                        "link": n.get("link"),
+                        "published": as_of,
+                    }
+                )
+            return out
+        except Exception:
+            return []
+

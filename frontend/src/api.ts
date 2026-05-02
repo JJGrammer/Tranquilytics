@@ -1,4 +1,5 @@
 import type {
+  DailyLeadersResponse,
   PreviewResponse,
   ReportResponse,
   TickerValidateResponse,
@@ -45,6 +46,11 @@ async function jsonFetch<T>(
     )
   }
   return res.json() as Promise<T>
+}
+
+export function fetchDailyLeaders(limit = 5): Promise<DailyLeadersResponse> {
+  const q = new URLSearchParams({ limit: String(limit) })
+  return jsonFetch<DailyLeadersResponse>(`/market/daily-leaders?${q}`)
 }
 
 export function validateTicker(symbol: string): Promise<TickerValidateResponse> {

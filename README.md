@@ -36,6 +36,9 @@ Keep the backend running on **port 8000** while developing the UI; Vite proxies 
 
 ## Notes
 
-- v1 uses **yfinance** for market data. Alpha Vantage can be added as a secondary fallback later.
+- v1 uses **yfinance** for market data and recent **headlines** (when available).
+- Headline polarity uses **VADER** (`vaderSentiment`)—a **predefined** lexicon/rules library that scores phrases as positive / negative / neutral; a **synthesizer** blends that score (as a probability) with technical model output before tones are chosen (short horizons weight headlines more than long horizons). The same blend step can accept another **API or model** if it returns a comparable score.
+- Alpha Vantage or other APIs can augment or replace headline sources later.
+- **Daily movers dropdown** (`GET /market/daily-leaders`): ranks symbols by yesterday→latest daily % move within a **curated large-cap universe** (~30 liquid US names—not the full exchange). Profiles use `longBusinessSummary` from yfinance when available.
 - The app avoids imperative language and includes a “not financial advice” disclaimer in UI/report output.
 
