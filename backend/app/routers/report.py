@@ -4,8 +4,9 @@ from __future__ import annotations
 Report generation endpoints.
 
 Primary goal:
-- Return an explainable, non-imperative "Leaning Buy/Hold/Leaning Sell" analysis for
-  short and long horizons, with confidence and citations.
+- Return an explainable, non-imperative tone-based analysis (
+  Safer Buy / Buy / Neutral / Sell / Sell Soon) for short and long horizons, with
+  reasoning, risk, and citations.
 
 Notes:
 - v1 intentionally prefers a score-first pipeline (probability/confidence + expected move)

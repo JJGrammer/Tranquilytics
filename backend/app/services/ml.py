@@ -64,20 +64,30 @@ def fit_predict_prob_up(
         base_rate = float(y.mean()) if len(y) else 0.5
         return max(0.05, min(0.95, base_rate))
 
-    base = Pipeline(
-        steps=[
-            ("scaler", StandardScaler()),
-            ("clf", LogisticRegression(max_iter=2000, class_weight="balanced")),
-        ]
-    )
-
-    # Calibrate for more meaningful confidence, using time-series splits.
-    tscv = TimeSeriesSplit(n_splits=5)
-    calibrated = CalibratedClassifierCV(base, method="isotonic", cv=tscv)
-    calibrated.fit(X, y)
+    def make_pipeline() -> Pipeline:
+        return Pipeline(
+            steps=[
+                ("scaler", StandardScaler()),
+                ("clf", LogisticRegression(max_iter=2000, class_weight="balanced")),
+            ]
+        )
 
     latest = X.iloc[[-1]]
-    prob_up = float(calibrated.predict_proba(latest)[0, 1])
+
+    # TimeSeriesSplit can yield training folds with a single class; calibration then
+    # fails inside a fold. Fall back to a plain pipeline fit on the full window.
+    try:
+        tscv = TimeSeriesSplit(n_splits=5)
+        calibrated = CalibratedClassifierCV(
+            make_pipeline(), method="isotonic", cv=tscv
+        )
+        calibrated.fit(X, y)
+        prob_up = float(calibrated.predict_proba(latest)[0, 1])
+    except ValueError:
+        pipe = make_pipeline()
+        pipe.fit(X, y)
+        prob_up = float(pipe.predict_proba(latest)[0, 1])
+
     return max(0.01, min(0.99, prob_up))
 
 

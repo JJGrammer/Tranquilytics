@@ -23,6 +23,8 @@ coverage.xml
 
 ## Backend runtime artifacts
 backend/app/cache.db
+backend/app/cache.db-wal
+backend/app/cache.db-shm
 backend/.env
 
 ## Node / Frontend

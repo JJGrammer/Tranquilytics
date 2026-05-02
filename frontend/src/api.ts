@@ -1,0 +1,68 @@
+import type {
+  PreviewResponse,
+  ReportResponse,
+  TickerValidateResponse,
+} from './types'
+
+const base =
+  typeof import.meta.env.VITE_API_BASE === 'string' && import.meta.env.VITE_API_BASE
+    ? import.meta.env.VITE_API_BASE.replace(/\/$/, '')
+    : '/api'
+
+async function jsonFetch<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(`${base}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch {
+    throw new Error(
+      'Cannot reach the API server. Start the backend: uvicorn app.main:app --reload --port 8000 (run from backend/)',
+    )
+  }
+
+  if (!res.ok) {
+    const proxyHint =
+      base === '/api' && [502, 503, 504].includes(res.status)
+        ? ' Dev proxy sends /api to http://127.0.0.1:8000 — start FastAPI there.'
+        : ''
+    let detail = ''
+    try {
+      detail = await res.text()
+    } catch {
+      /* ignore */
+    }
+    throw new Error(
+      (detail && detail.length < 280 ? `${detail.trim()} ` : '') +
+        `HTTP ${res.status} ${res.statusText}.${proxyHint}`.trim(),
+    )
+  }
+  return res.json() as Promise<T>
+}
+
+export function validateTicker(symbol: string): Promise<TickerValidateResponse> {
+  const q = new URLSearchParams({ symbol })
+  return jsonFetch<TickerValidateResponse>(`/ticker/validate?${q}`)
+}
+
+export function previewTicker(symbol: string): Promise<PreviewResponse> {
+  const q = new URLSearchParams({ symbol })
+  return jsonFetch<PreviewResponse>(`/ticker/preview?${q}`)
+}
+
+export function generateReport(
+  symbol: string,
+  includeCitations = true,
+): Promise<ReportResponse> {
+  return jsonFetch<ReportResponse>(`/report`, {
+    method: 'POST',
+    body: JSON.stringify({ symbol, include_citations: includeCitations }),
+  })
+}

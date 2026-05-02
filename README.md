@@ -32,6 +32,8 @@ npm run dev
 
 The UI will run at the URL printed by Vite (usually `http://127.0.0.1:5173`).
 
+Keep the backend running on **port 8000** while developing the UI; Vite proxies requests from `/api/*` to `http://127.0.0.1:8000` (see `frontend/vite.config.ts`). If you deploy the frontend separately, set `VITE_API_BASE` to your API origin (no trailing slash).
+
 ## Notes
 
 - v1 uses **yfinance** for market data. Alpha Vantage can be added as a secondary fallback later.

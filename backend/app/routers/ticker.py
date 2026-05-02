@@ -13,8 +13,10 @@ Why this exists:
 
 from fastapi import APIRouter, HTTPException
 
+from app.schemas.preview import PreviewResponse
 from app.schemas.ticker import TickerValidateResponse
 from app.services.market_data import MarketDataService
+from app.services.report_service import ReportService
 
 router = APIRouter()
 
@@ -37,4 +39,13 @@ def validate_ticker(symbol: str) -> TickerValidateResponse:
         exchange=info.get("exchange"),
         currency=info.get("currency"),
     )
+
+
+@router.get("/preview", response_model=PreviewResponse)
+def preview_ticker(symbol: str) -> PreviewResponse:
+    """Dashboard quick read: tones + risk without loading the full narrative report."""
+    symbol = (symbol or "").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol is required")
+    return ReportService().preview(symbol)
 

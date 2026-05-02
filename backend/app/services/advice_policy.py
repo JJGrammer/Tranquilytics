@@ -1,46 +1,47 @@
 from __future__ import annotations
 
 """
-Advice policy mapping (v1).
-
-Primary goal:
-- Convert model outputs (probability/confidence + magnitude + volatility) into a
-  user-facing "Leaning Buy / Hold / Leaning Sell" label.
-
-Why separate from ML:
-- We want to be able to tune thresholds and risk buffers without retraining models.
-- It makes behavior auditable for grading and easier to refactor safely.
+Maps model outputs to the five-tier tone labels used in the Tranquilytics UI.
+Keeps wording non-imperative (no "buy now"); thresholds are tunable without retraining.
 """
 
 from dataclasses import dataclass
 
 
+# Matches dashboard copy: strongest conviction at the extremes.
+SAFE_BUY = "Safer Buy"
+BUY = "Buy"
+NEUTRAL = "Neutral"
+SELL = "Sell"
+SELL_SOON = "Sell Soon"
+
+
 @dataclass(frozen=True)
 class AdviceDecision:
-    leaning: str
+    tone: str
     confidence: float
 
 
 def decide(prob_up: float, expected_return: float, volatility: float) -> AdviceDecision:
-    """
-    Score-first, decision-second policy.
-
-    - Default to Hold unless both probability and magnitude justify action.
-    - Use volatility-adjusted buffers to reduce "overtrading" advice.
-    """
-    # Volatility-adjusted buffer: higher vol => require stronger edge
+    """Score-first mapping: extremes first, then intermediate buy/sell, else neutral."""
     buffer = max(0.005, min(0.03, volatility * 0.75))
+    edge_buffer = buffer * 1.35
 
-    buy_thresh = 0.62
-    sell_thresh = 0.38
+    # Strong conviction bullish
+    if prob_up >= 0.73 and expected_return >= edge_buffer:
+        conf = max(prob_up, 0.5 + expected_return / max(buffer, 1e-6) * 0.05)
+        return AdviceDecision(tone=SAFE_BUY, confidence=min(1.0, conf))
 
-    if prob_up >= buy_thresh and expected_return >= buffer:
-        return AdviceDecision(leaning="Leaning Buy", confidence=prob_up)
+    # Strong conviction bearish
+    if prob_up <= 0.27 and expected_return <= -edge_buffer:
+        conf = max(1.0 - prob_up, 0.5 + (-expected_return) / max(buffer, 1e-6) * 0.05)
+        return AdviceDecision(tone=SELL_SOON, confidence=min(1.0, conf))
 
-    if prob_up <= sell_thresh and expected_return <= -buffer:
-        return AdviceDecision(leaning="Leaning Sell", confidence=1.0 - prob_up)
+    if prob_up >= 0.58 and expected_return >= buffer:
+        return AdviceDecision(tone=BUY, confidence=prob_up)
 
-    # Holding confidence is "how strongly we think it's not actionable"
+    if prob_up <= 0.42 and expected_return <= -buffer:
+        return AdviceDecision(tone=SELL, confidence=1.0 - prob_up)
+
     hold_conf = 1.0 - abs(prob_up - 0.5) * 2.0
-    return AdviceDecision(leaning="Hold", confidence=max(0.0, min(1.0, hold_conf)))
-
+    return AdviceDecision(tone=NEUTRAL, confidence=max(0.0, min(1.0, hold_conf)))
