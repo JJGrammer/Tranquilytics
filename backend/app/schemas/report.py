@@ -50,8 +50,13 @@ class ReportResponse(BaseModel):
 
     risk_level: str = Field(description="Low | Moderate | High")
 
-    sentiment_label: str = Field(description="Bullish | Bearish | Neutral (headlines)")
+    sentiment_label: str = Field(description="Bullish | Bearish | Neutral (recent headline layer)")
     sentiment_headlines_used: int = Field(ge=0)
+    sentiment_label_long: str = Field(
+        default="Neutral",
+        description="Bullish | Bearish | Neutral (long narrative headline layer)",
+    )
+    sentiment_headlines_long: int = Field(default=0, ge=0)
 
     short_term: HorizonAdvice
     long_term: HorizonAdvice

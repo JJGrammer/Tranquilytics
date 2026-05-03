@@ -1,5 +1,6 @@
 import type {
   DailyLeadersResponse,
+  DailyPicksResponse,
   PreviewResponse,
   ReportResponse,
   TickerValidateResponse,
@@ -51,6 +52,15 @@ async function jsonFetch<T>(
 export function fetchDailyLeaders(limit = 5): Promise<DailyLeadersResponse> {
   const q = new URLSearchParams({ limit: String(limit) })
   return jsonFetch<DailyLeadersResponse>(`/market/daily-leaders?${q}`)
+}
+
+export function fetchDailyPicks(
+  universe: 'sp500' | 'curated' = 'sp500',
+  refresh = false,
+): Promise<DailyPicksResponse> {
+  const q = new URLSearchParams({ universe })
+  if (refresh) q.set('refresh', '1')
+  return jsonFetch<DailyPicksResponse>(`/market/daily-picks?${q}`)
 }
 
 export function validateTicker(symbol: string): Promise<TickerValidateResponse> {

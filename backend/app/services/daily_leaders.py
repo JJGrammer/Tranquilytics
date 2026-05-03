@@ -18,6 +18,8 @@ _LARGE_CAP_TICKERS = sorted(
     }
 )
 
+CURATED_LARGE_CAP_UNIVERSE: list[str] = _LARGE_CAP_TICKERS
+
 
 def _day_change_pct(symbol: str) -> tuple[str, float | None]:
     try:

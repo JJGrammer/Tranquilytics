@@ -18,6 +18,75 @@ from datetime import datetime, timezone
 import pandas as pd
 import yfinance as yf
 
+# Reject obvious non-single-name screens when Yahoo exposes quoteType.
+_BLOCKED_QUOTE_TYPES = frozenset(
+    {
+        "MUTUALFUND",
+        "INDEX",
+        "CURRENCY",
+        "CRYPTOCURRENCY",
+        "OPTION",
+        "FUTURE",
+        "COMMODITY",
+        "DR",
+        "ECONOMIC",
+        "PORTFOLIO",
+        "MONEYMARKET",
+    }
+)
+
+
+def quote_type_blocks_screen(info: dict | None) -> bool:
+    if not info:
+        return False
+    qt = info.get("quoteType")
+    if not isinstance(qt, str):
+        return False
+    return qt.strip().upper() in _BLOCKED_QUOTE_TYPES
+
+
+def _recent_ohlc_supports_symbol(t: yf.Ticker, *, max_age_days: int = 35) -> bool:
+    """
+    Second-line validation when Yahoo metadata is sparse: require recent daily bars,
+    a sane last close, and at least one non-zero volume print in the last few sessions.
+    """
+    try:
+        h = t.history(period="60d", interval="1d", auto_adjust=False)
+        if h is None or h.empty or len(h) < 2:
+            return False
+        closes = h["Close"].dropna()
+        if closes.empty:
+            return False
+        last_close = float(closes.iloc[-1])
+        if last_close <= 0 or last_close != last_close:
+            return False
+
+        last = pd.Timestamp(h.index[-1])
+        if last.tzinfo is None:
+            last = last.tz_localize("UTC")
+        else:
+            last = last.tz_convert("UTC")
+        now = pd.Timestamp.now(tz=timezone.utc)
+        if (now - last).days > max_age_days:
+            return False
+
+        vol = h.get("Volume")
+        if vol is not None and len(vol) >= 1:
+            tail = vol.tail(8)
+            if tail.notna().any() and (tail.fillna(0) > 0).sum() == 0:
+                return False
+
+        return True
+    except Exception:
+        return False
+
+
+def _truncate_company_summary(text: str, max_len: int = 320) -> str:
+    text = text.replace("\n", " ").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1].rstrip() + "…"
+
 
 @dataclass(frozen=True)
 class TickerInfo:
@@ -36,31 +105,86 @@ class MarketDataService:
     - We keep this as a service so Alpha Vantage (or another provider) can be added later.
     """
 
-    def try_get_ticker_info(self, symbol: str) -> dict | None:
+    def try_get_ticker_info(
+        self,
+        symbol: str,
+        *,
+        include_company_description: bool = False,
+    ) -> dict | None:
         """
         Best-effort metadata lookup.
 
         Returns None when we cannot find meaningful fields (heuristic for "invalid").
+        `include_company_description` pulls `longBusinessSummary` (one slower yfinance `.info()` read).
         """
         try:
             t = yf.Ticker(symbol)
-            info = t.fast_info or {}
+            fast = t.fast_info or {}
             name = None
-            exchange = info.get("exchange")
-            currency = info.get("currency")
+            exchange = fast.get("exchange")
+            currency = fast.get("currency")
+            description: str | None = None
 
-            # fall back to slower info() only when needed
-            if exchange is None or currency is None:
+            needs_full = (
+                exchange is None
+                or currency is None
+                or include_company_description
+            )
+
+            full: dict = {}
+            if needs_full:
                 full = getattr(t, "info", None) or {}
                 exchange = exchange or full.get("exchange")
                 currency = currency or full.get("currency")
-                name = full.get("shortName") or full.get("longName")
+                name = name or full.get("shortName") or full.get("longName")
 
-            if exchange is None and currency is None and name is None:
-                # heuristic: treat as invalid if we couldn't find anything at all
+            metadata_ok = bool(name or exchange or currency)
+
+            if metadata_ok:
+                if not full and not needs_full:
+                    full = getattr(t, "info", None) or {}
+                if quote_type_blocks_screen(full):
+                    return None
+                if include_company_description:
+                    if not full:
+                        full = getattr(t, "info", None) or {}
+                    raw_summary = full.get("longBusinessSummary")
+                    blob = raw_summary.strip() if isinstance(raw_summary, str) else ""
+                    description = (
+                        _truncate_company_summary(blob) if blob else None
+                    )
+                return {
+                    "symbol": symbol,
+                    "name": name,
+                    "exchange": exchange,
+                    "currency": currency,
+                    **({"description": description} if description else {}),
+                }
+
+            if not full:
+                full = getattr(t, "info", None) or {}
+            if quote_type_blocks_screen(full):
                 return None
 
-            return {"symbol": symbol, "name": name, "exchange": exchange, "currency": currency}
+            if _recent_ohlc_supports_symbol(t):
+                name = name or full.get("shortName") or full.get("longName")
+                exchange = exchange or full.get("exchange")
+                currency = currency or full.get("currency")
+                if include_company_description:
+                    raw_summary = full.get("longBusinessSummary")
+                    blob = raw_summary.strip() if isinstance(raw_summary, str) else ""
+                    description = (
+                        _truncate_company_summary(blob) if blob else None
+                    )
+                return {
+                    "symbol": symbol,
+                    "name": name,
+                    "exchange": exchange,
+                    "currency": currency,
+                    **({"description": description} if description else {}),
+                }
+
+            return None
         except Exception:
             return None
 

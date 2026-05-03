@@ -47,6 +47,7 @@ _HOST_SUFFIXES = (
     "seekingalpha.com",
     "fool.com",
     "benzinga.com",
+    "news.google.com",
 )
 
 

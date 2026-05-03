@@ -21,3 +21,24 @@ class DailyLeadersResponse(BaseModel):
     note: str = Field(
         default="Ranked within a curated large-cap universe (not full market breadth).",
     )
+
+
+class DailyPickRow(BaseModel):
+    symbol: str
+    short_tone: str
+    risk_level: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    name: str | None = None
+    long_tone: str | None = None
+    pick_reason: str = Field(description="Why this row passed the daily screen")
+
+
+class DailyPicksResponse(BaseModel):
+    picks: list[DailyPickRow]
+    as_of: datetime | None = None
+    note: str = Field(
+        default=(
+            "Screen: short-term Safer Buy, or short-term Buy with Low volatility bucket, "
+            "within the curated universe. Cached; exploratory only—not financial advice."
+        ),
+    )

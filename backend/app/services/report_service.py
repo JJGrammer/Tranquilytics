@@ -16,6 +16,7 @@ from app.schemas.report import (
 from app.services.advice_policy import AdviceDecision, decide
 from app.services.cache import SqliteCache
 from app.services.features import compute_technical_features, make_horizon_labels
+from app.services.google_news_feed import dedupe_news, fetch_google_news_rss, headline_fingerprint
 from app.services.market_data import MarketDataService
 from app.services.news_curate import format_featured_citation_source, latest_notable_story
 from app.services.ml import (
@@ -24,7 +25,7 @@ from app.services.ml import (
     fit_predict_prob_up,
 )
 from app.services.risk import risk_level_from_volatility
-from app.services.sentiment import SentimentSnapshot, analyze_headlines
+from app.services.sentiment import SentimentSnapshot, analyze_dual_horizon_sentiment
 from app.services.synthesizer import (
     WEIGHT_LONG_SENT,
     WEIGHT_LONG_TECH,
@@ -33,6 +34,20 @@ from app.services.synthesizer import (
     blend_probability,
     nudge_expected_return,
 )
+
+
+def _unique_headline_detail_rows(a: list[dict], b: list[dict], limit: int = 10) -> list[dict]:
+    seen: set[str] = set()
+    out: list[dict] = []
+    for row in a + b:
+        fp = headline_fingerprint((row.get("title") or "").strip())
+        if not fp or fp in seen:
+            continue
+        seen.add(fp)
+        out.append(row)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _horizon_reasoning(
@@ -52,16 +67,24 @@ def _horizon_reasoning(
 
     if sent.headline_count == 0:
         sent_part = (
-            " Recent headlines were not available; headline sentiment defaulted to neutral "
+            " Headline sentiment for this horizon had no usable text; that layer defaulted to neutral "
             "and only technical signals informed the synthesizer blend."
+        )
+    elif horizon_name == "short-term":
+        sent_part = (
+            f" The short-horizon headline layer scored {sent.headline_count} recent headline(s) "
+            f"(about the last ~72 hours, or the newest available if dates were sparse), aggregating to "
+            f"{sent.label} (compound ≈ {sent.mean_compound:+.2f}). The synthesizer combined that with "
+            f"price dynamics using weights {syn.technical_weight:.0%} technical vs "
+            f"{syn.sentiment_weight:.0%} headline sentiment before mapping to tones."
         )
     else:
         sent_part = (
-            f" Over {sent.headline_count} headlines, lexical sentiment aggregated to "
-            f"{sent.label} (compound ≈ {sent.mean_compound:+.2f}). The synthesizer combined "
-            f"that with historical price dynamics using weights "
-            f"{syn.technical_weight:.0%} technical vs {syn.sentiment_weight:.0%} headline sentiment "
-            f"before mapping to tones."
+            f" The long-horizon headline layer scores a broader narrative (typically one anchor "
+            f"headline for sustained context, with a small pooled fallback when needed); "
+            f"{sent.headline_count} title(s) in that layer aggregated to {sent.label} "
+            f"(compound ≈ {sent.mean_compound:+.2f}). Blend weights were "
+            f"{syn.technical_weight:.0%} technical vs {syn.sentiment_weight:.0%} headline sentiment."
         )
 
     return (
@@ -80,13 +103,22 @@ class ReportService:
         self.md = MarketDataService()
 
     def preview(self, symbol: str) -> PreviewResponse:
-        info = self.md.try_get_ticker_info(symbol)
+        info = self.md.try_get_ticker_info(
+            symbol,
+            include_company_description=True,
+        )
         if info is None:
             return PreviewResponse(valid=False, symbol=symbol.upper().strip())
 
         sym = symbol.upper().strip()
-        news = self.md.get_news_items(sym)
-        sentiment = analyze_headlines(news)
+        yf_news = self.md.get_news_items(sym)
+        rss_news = fetch_google_news_rss(sym, cache=self.cache)
+        news_merged = dedupe_news(anchor=yf_news, extra=rss_news)
+        sent_short, sent_long, _horizon_diag = analyze_dual_horizon_sentiment(
+            news_merged,
+            yfinance_raw=yf_news,
+            rss_raw=rss_news,
+        )
 
         prices, _as_of = self.md.get_ohlc_history(sym, period="1y", interval="1d")
         feat = compute_technical_features(prices)
@@ -100,18 +132,18 @@ class ReportService:
         vol = estimate_volatility(feat)
         raw_s_exp = estimate_expected_return(feat, horizon_days=short_days)
         raw_l_exp = estimate_expected_return(feat, horizon_days=long_days)
-        short_exp_adj = nudge_expected_return(raw_s_exp, sentiment.mean_compound)
-        long_exp_adj = nudge_expected_return(raw_l_exp, sentiment.mean_compound)
+        short_exp_adj = nudge_expected_return(raw_s_exp, sent_short.mean_compound)
+        long_exp_adj = nudge_expected_return(raw_l_exp, sent_long.mean_compound)
 
         blended_s = blend_probability(
             tech_s,
-            sentiment.probability_bullish_aligned,
+            sent_short.probability_bullish_aligned,
             weight_technical=WEIGHT_SHORT_TECH,
             weight_sentiment=WEIGHT_SHORT_SENT,
         )
         blended_l = blend_probability(
             tech_l,
-            sentiment.probability_bullish_aligned,
+            sent_long.probability_bullish_aligned,
             weight_technical=WEIGHT_LONG_TECH,
             weight_sentiment=WEIGHT_LONG_SENT,
         )
@@ -124,25 +156,34 @@ class ReportService:
             valid=True,
             symbol=sym,
             name=info.get("name"),
+            description=info.get("description"),
             exchange=info.get("exchange"),
             currency=info.get("currency"),
             risk_level=risk,
-            sentiment_label=sentiment.label,
-            sentiment_headlines_used=sentiment.headline_count,
+            sentiment_label=sent_short.label,
+            sentiment_headlines_used=sent_short.headline_count,
+            sentiment_label_long=sent_long.label,
+            sentiment_headlines_long=sent_long.headline_count,
             short_term=HorizonPreview(tone=short_dec.tone, confidence=float(short_dec.confidence)),
             long_term=HorizonPreview(tone=long_dec.tone, confidence=float(long_dec.confidence)),
         )
 
     def generate(self, symbol: str, include_citations: bool) -> ReportResponse:
         sym = symbol.upper().strip()
-        cache_key = f"report:v4:{sym}:cit={int(include_citations)}"
+        cache_key = f"report:v6:{sym}:cit={int(include_citations)}"
         cached = self.cache.get(cache_key)
         if cached is not None:
             return ReportResponse.model_validate(cached.value)
 
         info = self.md.try_get_ticker_info(sym) or {}
-        news = self.md.get_news_items(sym)
-        sentiment = analyze_headlines(news)
+        yf_news = self.md.get_news_items(sym)
+        rss_news = fetch_google_news_rss(sym, cache=self.cache)
+        news_merged = dedupe_news(anchor=yf_news, extra=rss_news)
+        sent_short, sent_long, horizon_diag = analyze_dual_horizon_sentiment(
+            news_merged,
+            yfinance_raw=yf_news,
+            rss_raw=rss_news,
+        )
 
         prices, as_of = self.md.get_ohlc_history(sym, period="1y", interval="1d")
         feat = compute_technical_features(prices)
@@ -157,18 +198,18 @@ class ReportService:
         vol = estimate_volatility(feat)
         raw_s_exp = estimate_expected_return(feat, horizon_days=short_days)
         raw_l_exp = estimate_expected_return(feat, horizon_days=long_days)
-        short_exp_adj = nudge_expected_return(raw_s_exp, sentiment.mean_compound)
-        long_exp_adj = nudge_expected_return(raw_l_exp, sentiment.mean_compound)
+        short_exp_adj = nudge_expected_return(raw_s_exp, sent_short.mean_compound)
+        long_exp_adj = nudge_expected_return(raw_l_exp, sent_long.mean_compound)
 
         blended_s = blend_probability(
             tech_s,
-            sentiment.probability_bullish_aligned,
+            sent_short.probability_bullish_aligned,
             weight_technical=WEIGHT_SHORT_TECH,
             weight_sentiment=WEIGHT_SHORT_SENT,
         )
         blended_l = blend_probability(
             tech_l,
-            sentiment.probability_bullish_aligned,
+            sent_long.probability_bullish_aligned,
             weight_technical=WEIGHT_LONG_TECH,
             weight_sentiment=WEIGHT_LONG_SENT,
         )
@@ -179,14 +220,14 @@ class ReportService:
 
         syn_short = HorizonSynthesis(
             technical_probability=float(tech_s),
-            sentiment_probability=float(sentiment.probability_bullish_aligned),
+            sentiment_probability=float(sent_short.probability_bullish_aligned),
             blended_probability=float(blended_s),
             technical_weight=float(WEIGHT_SHORT_TECH),
             sentiment_weight=float(WEIGHT_SHORT_SENT),
         )
         syn_long = HorizonSynthesis(
             technical_probability=float(tech_l),
-            sentiment_probability=float(sentiment.probability_bullish_aligned),
+            sentiment_probability=float(sent_long.probability_bullish_aligned),
             blended_probability=float(blended_l),
             technical_weight=float(WEIGHT_LONG_TECH),
             sentiment_weight=float(WEIGHT_LONG_SENT),
@@ -202,9 +243,10 @@ class ReportService:
         )
 
         headline_note = (
-            f"{sentiment.headline_count} headlines scored ({sentiment.label} aggregate)."
-            if sentiment.headline_count
-            else "No headlines fetched; headline sentiment defaulted to neutral."
+            f"recent layer: {sent_short.headline_count} headline(s) ({sent_short.label}); "
+            f"long narrative layer: {sent_long.headline_count} ({sent_long.label})."
+            if (sent_short.headline_count or sent_long.headline_count)
+            else "No headline text fetched; headline layers defaulted to neutral."
         )
         summary = (
             f"For {sym}, the synthesizer combined technical history with {headline_note} "
@@ -230,15 +272,26 @@ class ReportService:
                     Citation(
                         kind="sentiment_model",
                         source=(
-                            "VADER lexicon classifier on fetched headlines "
-                            "(vaderSentiment; rule-based polarity, no per-ticker training)"
+                            "VADER on headlines: short horizon uses a recent window (~72h, else newest "
+                            "available); long horizon uses one narrative anchor headline (oldest dated "
+                            "story when timestamps exist) with a small pooled fallback—sources are "
+                            "yfinance ticker news plus Google News RSS, deduped."
                         ),
                         as_of=datetime.now(tz=timezone.utc),
                     ),
                 ]
             )
 
-            featured, feat_reason = latest_notable_story(news)
+            for fk, fv in horizon_diag.items():
+                citations.append(
+                    Citation(
+                        kind="sentiment_feed_status",
+                        source=f"{fk}: {fv}",
+                        as_of=datetime.now(tz=timezone.utc),
+                    )
+                )
+
+            featured, feat_reason = latest_notable_story(news_merged)
             if featured is not None:
                 citations.append(
                     Citation(
@@ -250,12 +303,23 @@ class ReportService:
                     )
                 )
 
-            for row in sentiment.details[:8]:
+            for row in _unique_headline_detail_rows(
+                sent_short.details,
+                sent_long.details,
+                limit=10,
+            ):
+                src = row.get("feed") or "mixed"
                 citations.append(
                     Citation(
                         kind="news_headline",
-                        source=f"[{row['publisher']}] {row['title']}"
-                        + (f" (compound={row['compound']:+.3f})" if "compound" in row else ""),
+                        source=(
+                            f"[{src}] [{row['publisher']}] {row['title']}"
+                            + (
+                                f" (compound={row['compound']:+.3f})"
+                                if "compound" in row
+                                else ""
+                            )
+                        ),
                         as_of=row.get("published"),
                     )
                 )
@@ -268,8 +332,10 @@ class ReportService:
             generated_at=datetime.now(tz=timezone.utc),
             as_of=as_of,
             risk_level=risk,
-            sentiment_label=sentiment.label,
-            sentiment_headlines_used=int(sentiment.headline_count),
+            sentiment_label=sent_short.label,
+            sentiment_headlines_used=int(sent_short.headline_count),
+            sentiment_label_long=sent_long.label,
+            sentiment_headlines_long=int(sent_long.headline_count),
             short_term=HorizonAdvice(
                 horizon="short",
                 window_trading_days=short_days,
@@ -283,7 +349,7 @@ class ReportService:
                     expected_return_adjusted=float(short_exp_adj),
                     risk_level=risk,
                     rsi_hint=rsi_hint,
-                    sent=sentiment,
+                    sent=sent_short,
                     syn=syn_short,
                 ),
                 expected_return=float(short_exp_adj),
@@ -302,7 +368,7 @@ class ReportService:
                     expected_return_adjusted=float(long_exp_adj),
                     risk_level=risk,
                     rsi_hint=rsi_hint,
-                    sent=sentiment,
+                    sent=sent_long,
                     syn=syn_long,
                 ),
                 expected_return=float(long_exp_adj),

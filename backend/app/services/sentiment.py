@@ -9,6 +9,7 @@ single-outlet bias.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
@@ -135,3 +136,142 @@ def analyze_multi_sources(feed_lists: dict[str, list[dict]]) -> SentimentSnapsho
         pooled_rows.extend(snap.details)
 
     return _rows_to_snapshot(pooled_rows, feed_breakdown=breakdown)
+
+
+SHORT_RECENCY_HOURS = 72
+_MIN_SHORT_HEADLINES = 2
+_SHORT_FALLBACK_NEWEST = 8
+_LONG_FALLBACK_POOL = 10
+
+
+def _aware(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _usable_titles(items: list[dict]) -> list[dict]:
+    return [it for it in items if (it.get("title") or "").strip()]
+
+
+def _sort_newest(items: list[dict]) -> list[dict]:
+    def key(it: dict) -> datetime:
+        p = it.get("published")
+        if isinstance(p, datetime):
+            return _aware(p)
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    return sorted(items, key=key, reverse=True)
+
+
+def _sort_oldest(items: list[dict]) -> list[dict]:
+    def key(it: dict) -> datetime:
+        p = it.get("published")
+        if isinstance(p, datetime):
+            return _aware(p)
+        return datetime.max.replace(tzinfo=timezone.utc)
+
+    return sorted(items, key=key)
+
+
+def headlines_for_short_horizon(
+    merged: list[dict],
+    *,
+    now: datetime | None = None,
+) -> list[dict]:
+    """Recent headlines (~72h) for short-term tone; fall back to newest titles if sparse."""
+    now = now or datetime.now(tz=timezone.utc)
+    usable = _usable_titles(merged)
+    if not usable:
+        return []
+
+    cutoff = now - timedelta(hours=SHORT_RECENCY_HOURS)
+    dated_recent: list[dict] = []
+    undated: list[dict] = []
+    for it in usable:
+        p = it.get("published")
+        if isinstance(p, datetime):
+            if _aware(p) >= cutoff:
+                dated_recent.append(it)
+        else:
+            undated.append(it)
+
+    if len(dated_recent) >= _MIN_SHORT_HEADLINES:
+        return _sort_newest(dated_recent)
+
+    pool = _sort_newest(dated_recent + undated)
+    return pool[:_SHORT_FALLBACK_NEWEST] if pool else usable[:_SHORT_FALLBACK_NEWEST]
+
+
+def pick_long_horizon_headline(merged: list[dict]) -> dict | None:
+    """
+    One representative "narrative" headline for the long-horizon layer: prefer the
+    oldest dated story in the batch (background / sustained story). If dates are
+    missing, use the longest title as a coarse stand-in for an overview piece.
+    """
+    usable = _usable_titles(merged)
+    if not usable:
+        return None
+    dated = [it for it in usable if isinstance(it.get("published"), datetime)]
+    if dated:
+        return _sort_oldest(dated)[0]
+    return max(usable, key=lambda x: len((x.get("title") or "").strip()))
+
+
+def analyze_dual_horizon_sentiment(
+    merged: list[dict],
+    *,
+    yfinance_raw: list[dict],
+    rss_raw: list[dict],
+    now: datetime | None = None,
+) -> tuple[SentimentSnapshot, SentimentSnapshot, dict[str, str]]:
+    """
+    Short horizon: VADER on a **recent** headline subset.
+    Long horizon: VADER on **one** representative narrative title, with a small
+    pooled fallback if that would otherwise be empty.
+    """
+    now = now or datetime.now(tz=timezone.utc)
+    y_n = len(_usable_titles(yfinance_raw))
+    r_n = len(_usable_titles(rss_raw))
+    u_n = len(_usable_titles(merged))
+
+    short_items = headlines_for_short_horizon(merged, now=now)
+    snap_short = analyze_headlines(short_items)
+
+    long_pick = pick_long_horizon_headline(merged)
+    if long_pick:
+        snap_long = analyze_headlines([long_pick])
+    else:
+        snap_long = SentimentSnapshot(0, 0.0, 0.5, "Neutral", [])
+
+    if snap_long.headline_count == 0 and merged:
+        pool = _usable_titles(merged)[:_LONG_FALLBACK_POOL]
+        snap_long = analyze_headlines(pool)
+
+    narr_title = (long_pick.get("title") or "").strip() if long_pick else ""
+    if len(narr_title) > 140:
+        narr_title = narr_title[:139] + "…"
+
+    breakdown: dict[str, str] = {
+        "ingest_yahoo": (
+            f"{y_n} usable headline(s) in yfinance batch."
+            if y_n
+            else "No Yahoo ticker headlines in this fetch (common); other lanes may still contribute."
+        ),
+        "ingest_google_rss": f"{r_n} usable headline(s) in Google News RSS batch.",
+        "deduped_unique": f"{u_n} unique headline(s) after cross-source dedupe.",
+        "short_layer": (
+            f"{snap_short.headline_count} recent headline(s) scored (~{SHORT_RECENCY_HOURS}h or newest-fallback); "
+            f"tilt={snap_short.label} (compound={snap_short.mean_compound:+.3f})"
+            if snap_short.headline_count
+            else "No headlines available for the short/recent layer; neutral."
+        ),
+        "long_layer": (
+            f"Narrative layer scored {snap_long.headline_count} headline(s); tilt={snap_long.label} "
+            f"(compound={snap_long.mean_compound:+.3f})"
+            + (f"; anchor: “{narr_title}”" if narr_title else "")
+            if snap_long.headline_count
+            else "No headline text for the long narrative layer; neutral."
+        ),
+    }
+    return snap_short, snap_long, breakdown

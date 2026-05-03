@@ -41,6 +41,19 @@ def create_app() -> FastAPI:
     app.include_router(report_router, prefix="/report", tags=["report"])
     app.include_router(market_router, prefix="/market", tags=["market"])
 
+    @app.get("/", include_in_schema=False)
+    def root() -> dict[str, str]:
+        """8000 hosts the JSON API only; the SPA runs on Vite (typically :5173)."""
+        return {
+            "service": "Tranquilytics API",
+            "docs": "/docs",
+            "health": "/health",
+            "note": (
+                "No UI at /. Use http://localhost:5173 for the dashboard in dev "
+                "(Vite proxies /api → this server)."
+            ),
+        }
+
     return app
 
 
