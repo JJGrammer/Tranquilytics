@@ -12,6 +12,11 @@ const base =
     ? import.meta.env.VITE_API_BASE.replace(/\/$/, '')
     : '/api'
 
+export function isAbortError(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'AbortError') return true
+  return e instanceof Error && e.name === 'AbortError'
+}
+
 async function jsonFetch<T>(
   path: string,
   init?: RequestInit,
@@ -25,7 +30,8 @@ async function jsonFetch<T>(
         ...(init?.headers ?? {}),
       },
     })
-  } catch {
+  } catch (e) {
+    if (isAbortError(e)) throw e
     throw new Error(
       'Cannot reach the API server. Start the backend: uvicorn app.main:app --reload --port 8000 (run from backend/)',
     )
@@ -59,10 +65,11 @@ export function fetchDailyPicks(
   universe: 'sp500' | 'curated' = 'sp500',
   refresh = false,
   focus: 'short' | 'long' = 'short',
+  init?: RequestInit,
 ): Promise<DailyPicksResponse> {
   const q = new URLSearchParams({ universe, focus })
   if (refresh) q.set('refresh', '1')
-  return jsonFetch<DailyPicksResponse>(`/market/daily-picks?${q}`)
+  return jsonFetch<DailyPicksResponse>(`/market/daily-picks?${q}`, init)
 }
 
 export function validateTicker(symbol: string): Promise<TickerValidateResponse> {

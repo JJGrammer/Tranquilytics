@@ -14,6 +14,7 @@ import {
   fetchDailyPicks,
   fetchWatchlist,
   generateReport,
+  isAbortError,
   previewTicker,
   removeWatchlistSymbol,
   validateTicker,
@@ -24,6 +25,9 @@ import {
   readStoredColorMode,
   type ColorMode,
 } from './theme'
+
+/** Full S&P scan can exceed this; we abort client-side so the UI never sticks on “Scanning…”. */
+const SCREENER_FETCH_TIMEOUT_MS = 12 * 60 * 1000
 
 const TONES_ORDER = [
   'Safer Buy',
@@ -301,6 +305,9 @@ export default function App() {
     Record<string, WatchlistShortHint>
   >({})
   const quickCloseTimer = useRef<number | null>(null)
+  const picksLoadGeneration = useRef(0)
+  const picksAbortRef = useRef<AbortController | null>(null)
+  const picksAbortReason = useRef<'timeout' | 'user' | null>(null)
 
   const cancelQuickClose = useCallback(() => {
     if (quickCloseTimer.current != null) {
@@ -313,24 +320,58 @@ export default function App() {
 
   const loadDailyPicksScreen = useCallback(
     async (refresh: boolean, focus: 'short' | 'long') => {
+      picksAbortRef.current?.abort()
+      const ac = new AbortController()
+      picksAbortRef.current = ac
+      picksAbortReason.current = null
+
+      const myGen = ++picksLoadGeneration.current
       setMainTab('screener')
       setPicksFocus(focus)
       setPicksExpanded(true)
       setPicksLoading(true)
       setPicksNote(null)
+
+      const timeoutId = window.setTimeout(() => {
+        if (picksLoadGeneration.current !== myGen) return
+        picksAbortReason.current = 'timeout'
+        ac.abort()
+      }, SCREENER_FETCH_TIMEOUT_MS)
+
       try {
-        const r = await fetchDailyPicks('sp500', refresh, focus)
+        const r = await fetchDailyPicks('sp500', refresh, focus, { signal: ac.signal })
+        if (myGen !== picksLoadGeneration.current) return
         setDailyPicks(r.picks ?? [])
         setPicksNote(r.note ?? '')
-      } catch {
+      } catch (e) {
+        if (myGen !== picksLoadGeneration.current) return
+        if (isAbortError(e)) {
+          setDailyPicks([])
+          if (picksAbortReason.current === 'timeout') {
+            setPicksNote(
+              'This request timed out on the client after 12 minutes. A cold S&P 500 scan can take longer than that on the server — wait and use “Re-scan … (ignore cache)” once the backend finishes, or run the API with a smaller universe during development.',
+            )
+          } else {
+            setPicksNote('Scan cancelled.')
+          }
+          return
+        }
         setDailyPicks([])
         setPicksNote(null)
       } finally {
-        setPicksLoading(false)
+        window.clearTimeout(timeoutId)
+        if (myGen === picksLoadGeneration.current) {
+          setPicksLoading(false)
+        }
       }
     },
     [],
   )
+
+  const cancelDailyPicksScreen = useCallback(() => {
+    picksAbortReason.current = 'user'
+    picksAbortRef.current?.abort()
+  }, [])
 
   const scheduleQuickClose = useCallback(() => {
     cancelQuickClose()
@@ -1209,8 +1250,22 @@ export default function App() {
                 <p className="mt-3 text-xs text-slate-600 dark:text-slate-600">{picksNote}</p>
               ) : null}
               {picksLoading ? (
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-500">Working through the index…</p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <p className="text-sm text-slate-600 dark:text-slate-500">
+                    Working through the index… (can take many minutes for S&amp;P 500)
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => cancelDailyPicksScreen()}
+                    className="rounded-md border border-sky-300/90 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-sky-100/80 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800/80"
+                  >
+                    Cancel scan
+                  </button>
+                </div>
               ) : dailyPicks.length === 0 ? (
+                picksNote != null &&
+                (picksNote.startsWith('Scan cancelled') ||
+                  picksNote.startsWith('This request timed out')) ? null : (
                 <p className="mt-2 text-sm text-slate-600 dark:text-slate-500">
                   {picksNote === null
                     ? 'Request failed. Is the API running?'
@@ -1218,6 +1273,7 @@ export default function App() {
                       ? 'No tickers passed the long-term screen (Safer Buy, or Buy with Low volatility).'
                       : 'No tickers passed the short-term screen (Safer Buy, or Buy with Low volatility).'}
                 </p>
+                )
               ) : (
                 <ul className="mt-3 max-w-full space-y-1">
                   {dailyPicks.map((row) => (
