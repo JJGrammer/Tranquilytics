@@ -15,6 +15,7 @@ Design intent:
 
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -43,7 +44,7 @@ class SqliteCache:
 
     def _init(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as con:
+        with closing(self._connect()) as con:
             con.execute(
                 """
                 CREATE TABLE IF NOT EXISTS cache (
@@ -58,7 +59,7 @@ class SqliteCache:
 
     def get(self, key: str) -> CacheEntry | None:
         now = datetime.now(tz=timezone.utc)
-        with self._connect() as con:
+        with closing(self._connect()) as con:
             row = con.execute(
                 "SELECT key, value_json, created_at, expires_at FROM cache WHERE key = ?",
                 (key,),
@@ -86,7 +87,7 @@ class SqliteCache:
             created_at=now,
             expires_at=now + timedelta(seconds=ttl_seconds),
         )
-        with self._connect() as con:
+        with closing(self._connect()) as con:
             con.execute(
                 """
                 INSERT INTO cache(key, value_json, created_at, expires_at)
@@ -107,6 +108,6 @@ class SqliteCache:
         return entry
 
     def delete(self, key: str) -> None:
-        with self._connect() as con:
+        with closing(self._connect()) as con:
             con.execute("DELETE FROM cache WHERE key = ?", (key,))
 

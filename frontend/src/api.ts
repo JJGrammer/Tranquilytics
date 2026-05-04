@@ -4,6 +4,7 @@ import type {
   PreviewResponse,
   ReportResponse,
   TickerValidateResponse,
+  WatchlistListResponse,
 } from './types'
 
 const base =
@@ -57,8 +58,9 @@ export function fetchDailyLeaders(limit = 5): Promise<DailyLeadersResponse> {
 export function fetchDailyPicks(
   universe: 'sp500' | 'curated' = 'sp500',
   refresh = false,
+  focus: 'short' | 'long' = 'short',
 ): Promise<DailyPicksResponse> {
-  const q = new URLSearchParams({ universe })
+  const q = new URLSearchParams({ universe, focus })
   if (refresh) q.set('refresh', '1')
   return jsonFetch<DailyPicksResponse>(`/market/daily-picks?${q}`)
 }
@@ -81,4 +83,20 @@ export function generateReport(
     method: 'POST',
     body: JSON.stringify({ symbol, include_citations: includeCitations }),
   })
+}
+
+export function fetchWatchlist(): Promise<WatchlistListResponse> {
+  return jsonFetch<WatchlistListResponse>('/watchlist')
+}
+
+export function addWatchlistSymbol(symbol: string): Promise<WatchlistListResponse> {
+  return jsonFetch<WatchlistListResponse>('/watchlist', {
+    method: 'POST',
+    body: JSON.stringify({ symbol }),
+  })
+}
+
+export function removeWatchlistSymbol(symbol: string): Promise<WatchlistListResponse> {
+  const enc = encodeURIComponent(symbol)
+  return jsonFetch<WatchlistListResponse>(`/watchlist/${enc}`, { method: 'DELETE' })
 }

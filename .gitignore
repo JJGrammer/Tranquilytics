@@ -25,6 +25,9 @@ coverage.xml
 backend/app/cache.db
 backend/app/cache.db-wal
 backend/app/cache.db-shm
+backend/app/local_state.db
+backend/app/local_state.db-wal
+backend/app/local_state.db-shm
 backend/.env
 
 ## Node / Frontend

@@ -15,6 +15,10 @@ class PreviewResponse(BaseModel):
     description: str | None = Field(default=None)
     exchange: str | None = None
     currency: str | None = None
+    change_pct_day: float | None = Field(
+        default=None,
+        description="Latest daily session close vs prior session close, approximate %.",
+    )
     risk_level: str = Field(default="Moderate")
     sentiment_label: str = Field(default="Neutral", description="Recent-headline tilt (short layer)")
     sentiment_headlines_used: int = Field(default=0, ge=0)

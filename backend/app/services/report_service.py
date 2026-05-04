@@ -50,6 +50,23 @@ def _unique_headline_detail_rows(a: list[dict], b: list[dict], limit: int = 10) 
     return out
 
 
+def _latest_session_change_pct(prices: pd.DataFrame) -> float | None:
+    """Last daily close vs prior row's close, % (same bar semantics as daily movers)."""
+    try:
+        if prices is None or prices.empty or len(prices) < 2:
+            return None
+        closes = prices["Close"].dropna()
+        if len(closes) < 2:
+            return None
+        last = float(closes.iloc[-1])
+        prev = float(closes.iloc[-2])
+        if prev <= 0 or last != last or prev != prev:
+            return None
+        return round((last / prev - 1.0) * 100.0, 2)
+    except Exception:
+        return None
+
+
 def _horizon_reasoning(
     dec: AdviceDecision,
     *,
@@ -151,6 +168,7 @@ class ReportService:
         short_dec = decide(blended_s, short_exp_adj, vol)
         long_dec = decide(blended_l, long_exp_adj, vol)
         risk = risk_level_from_volatility(vol)
+        day_chg = _latest_session_change_pct(prices)
 
         return PreviewResponse(
             valid=True,
@@ -159,6 +177,7 @@ class ReportService:
             description=info.get("description"),
             exchange=info.get("exchange"),
             currency=info.get("currency"),
+            change_pct_day=day_chg,
             risk_level=risk,
             sentiment_label=sent_short.label,
             sentiment_headlines_used=sent_short.headline_count,

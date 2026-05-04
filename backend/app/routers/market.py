@@ -39,13 +39,20 @@ def daily_picks(
         False,
         description="If true, recompute even when a cached response exists (slow for sp500).",
     ),
+    focus: Literal["short", "long"] = Query(
+        "short",
+        description=(
+            "short: screen on short-term tone (default). "
+            "long: same inclusion rules on long-term tone (long-term buy screen)."
+        ),
+    ),
 ) -> DailyPicksResponse:
     """
-    Model-screened names: short-term Safer Buy, or Buy with Low volatility.
-    Default universe is S&P 500; responses are cached ~24h per universe.
+    Model-screened names: Safer Buy, or Buy with Low volatility, on short- or long-term horizon.
+    Default universe is S&P 500; responses are cached ~24h per universe and focus.
     """
     syms: tuple[str, ...] = SP500_TICKERS if universe == "sp500" else tuple(CURATED_LARGE_CAP_UNIVERSE)
-    cache_key = f"market:daily_picks:{universe}:v2"
+    cache_key = f"market:daily_picks:{universe}:{focus}:v4"
     cache = SqliteCache()
     if not refresh:
         hit = cache.get(cache_key)
@@ -53,10 +60,11 @@ def daily_picks(
             return DailyPicksResponse.model_validate(hit.value)
 
     workers = 6 if len(syms) > 120 else 5
-    rows, as_of = compute_daily_model_picks(syms, max_workers=workers)
+    rows, as_of = compute_daily_model_picks(syms, max_workers=workers, focus=focus)
+    horizon = "short-term" if focus == "short" else "long-term"
     note = (
         f"Universe {universe}: scanned {len(syms)} symbols with the same stack as /ticker/preview. "
-        "Includes short-term Safer Buy, or Buy when interpreted risk is Low. "
+        f"Includes {horizon} Safer Buy, or Buy when interpreted risk is Low. "
         "First uncached S&P 500 run can take many minutes. Exploratory only—not financial advice."
     )
     body = DailyPicksResponse(picks=rows, as_of=as_of, note=note)

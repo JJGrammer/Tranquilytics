@@ -44,7 +44,7 @@ describe('api client', () => {
     await expect(validateTicker('X')).rejects.toThrow(/Dev proxy/)
   })
 
-  it('fetchDailyPicks adds refresh=1 when requested', async () => {
+  it('fetchDailyPicks adds refresh=1 and focus when requested', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ picks: [], note: 'ok' }), {
         status: 200,
@@ -52,10 +52,11 @@ describe('api client', () => {
       }),
     )
     const { fetchDailyPicks } = await import('./api')
-    await fetchDailyPicks('curated', true)
+    await fetchDailyPicks('curated', true, 'long')
     const [url] = fetchMock.mock.calls[0] as [string]
     expect(url).toContain('universe=curated')
     expect(url).toContain('refresh=1')
+    expect(url).toContain('focus=long')
   })
 
   it('generateReport POSTs JSON body', async () => {

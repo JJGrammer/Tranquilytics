@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -27,9 +28,19 @@ class DailyPickRow(BaseModel):
     symbol: str
     short_tone: str
     risk_level: str
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confidence for the horizon that satisfied the screen (short or long).",
+    )
     name: str | None = None
     long_tone: str | None = None
+    screen_tone: str = Field(
+        description="Tone that satisfied the screen (same as short or long tone depending on focus).",
+    )
+    screen_horizon: Literal["short", "long"] = Field(
+        description="Which horizon the screen policy evaluated.",
+    )
     pick_reason: str = Field(description="Why this row passed the daily screen")
 
 

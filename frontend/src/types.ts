@@ -38,6 +38,8 @@ export type DailyPickRow = {
   confidence: number
   name?: string | null
   long_tone?: string | null
+  screen_tone: string
+  screen_horizon: 'short' | 'long'
   pick_reason: string
 }
 
@@ -54,6 +56,8 @@ export type PreviewResponse = {
   description?: string | null
   exchange?: string | null
   currency?: string | null
+  /** Latest daily close vs prior session, %; null if unavailable */
+  change_pct_day?: number | null
   risk_level: string
   sentiment_label: string
   sentiment_headlines_used: number
@@ -86,6 +90,18 @@ export type HorizonAdvice = {
   synthesis: HorizonSynthesis
   expected_return?: number | null
   volatility?: number | null
+}
+
+export type WatchlistItem = {
+  symbol: string
+  sort_order: number
+  added_at: string
+}
+
+export type WatchlistListResponse = {
+  user_id: string
+  items: WatchlistItem[]
+  max_items: number
 }
 
 export type ReportResponse = {
