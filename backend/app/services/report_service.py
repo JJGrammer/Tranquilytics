@@ -122,7 +122,7 @@ class ReportService:
     def preview(self, symbol: str) -> PreviewResponse:
         info = self.md.try_get_ticker_info(
             symbol,
-            include_company_description=True,
+            include_company_description=False,
         )
         if info is None:
             return PreviewResponse(valid=False, symbol=symbol.upper().strip())

@@ -12,8 +12,10 @@ Design intent:
 - Prototype-friendly CORS defaults (open) for local development; lock down later.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from yfinance.exceptions import YFRateLimitError
 
 from app.routers.health import router as health_router
 from app.routers.market import router as market_router
@@ -42,6 +44,19 @@ def create_app() -> FastAPI:
     app.include_router(report_router, prefix="/report", tags=["report"])
     app.include_router(market_router, prefix="/market", tags=["market"])
     app.include_router(watchlist_router, prefix="/watchlist", tags=["watchlist"])
+
+    @app.exception_handler(YFRateLimitError)
+    async def yfinance_rate_limited(_: Request, __: YFRateLimitError) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": (
+                    "Market data is temporarily unavailable because Yahoo Finance "
+                    "rate-limited this client. Wait a few minutes and try again, or "
+                    "try from another network."
+                )
+            },
+        )
 
     @app.get("/", include_in_schema=False)
     def root() -> dict[str, str]:

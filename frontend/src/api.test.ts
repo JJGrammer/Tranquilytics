@@ -44,6 +44,17 @@ describe('api client', () => {
     await expect(validateTicker('X')).rejects.toThrow(/Dev proxy/)
   })
 
+  it('503 JSON uses FastAPI detail as the error message', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Please wait and retry.' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    const { validateTicker } = await import('./api')
+    await expect(validateTicker('AAPL')).rejects.toThrow('Please wait and retry.')
+  })
+
   it('fetchDailyPicks adds refresh=1 and focus when requested', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ picks: [], note: 'ok' }), {

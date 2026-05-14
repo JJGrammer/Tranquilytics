@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import yfinance as yf
+from yfinance.exceptions import YFRateLimitError
 
 # Reject obvious non-single-name screens when Yahoo exposes quoteType.
 _BLOCKED_QUOTE_TYPES = frozenset(
@@ -43,6 +44,18 @@ def quote_type_blocks_screen(info: dict | None) -> bool:
     if not isinstance(qt, str):
         return False
     return qt.strip().upper() in _BLOCKED_QUOTE_TYPES
+
+
+def _quote_type_dict_for_screen(fast: dict, full: dict) -> dict:
+    """
+    Prefer quoteType from fast_info so we can screen tickers without calling `.info()`,
+    which triggers a separate Yahoo request and is easy to rate-limit (then every
+    symbol looks "invalid" to the UI).
+    """
+    qt = fast.get("quoteType")
+    if isinstance(qt, str) and qt.strip():
+        return {"quoteType": qt.strip()}
+    return full
 
 
 def _recent_ohlc_supports_symbol(t: yf.Ticker, *, max_age_days: int = 35) -> bool:
@@ -77,6 +90,8 @@ def _recent_ohlc_supports_symbol(t: yf.Ticker, *, max_age_days: int = 35) -> boo
                 return False
 
         return True
+    except YFRateLimitError:
+        raise
     except Exception:
         return False
 
@@ -142,8 +157,10 @@ class MarketDataService:
 
             if metadata_ok:
                 if not full and not needs_full:
-                    full = getattr(t, "info", None) or {}
-                if quote_type_blocks_screen(full):
+                    full = _quote_type_dict_for_screen(fast, {})
+                    if not full.get("quoteType"):
+                        full = getattr(t, "info", None) or {}
+                if quote_type_blocks_screen(_quote_type_dict_for_screen(fast, full)):
                     return None
                 if include_company_description:
                     if not full:
@@ -162,8 +179,10 @@ class MarketDataService:
                 }
 
             if not full:
-                full = getattr(t, "info", None) or {}
-            if quote_type_blocks_screen(full):
+                full = _quote_type_dict_for_screen(fast, {})
+                if not full.get("quoteType"):
+                    full = getattr(t, "info", None) or {}
+            if quote_type_blocks_screen(_quote_type_dict_for_screen(fast, full)):
                 return None
 
             if _recent_ohlc_supports_symbol(t):
@@ -185,6 +204,8 @@ class MarketDataService:
                 }
 
             return None
+        except YFRateLimitError:
+            raise
         except Exception:
             return None
 
@@ -238,6 +259,8 @@ class MarketDataService:
                     }
                 )
             return out
+        except YFRateLimitError:
+            raise
         except Exception:
             return []
 

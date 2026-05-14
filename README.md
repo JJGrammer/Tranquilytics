@@ -4,8 +4,8 @@ Stress-free stock analysis with transparent reasoning.
 
 ## Single repo App
 
-- `backend/`: Python API (yfinance-first), report generation, caching
-- `frontend/`: React + Tailwind dashboard UI
+- `backend/`: Python fastAPI (yfinance-first), report generation, SQLite DB, scikit for ML
+- `frontend/`: React + Tailwind dashboard UI, Node.js
 - `docs/`: project research PDFs and notes
 
 ## Local development
@@ -40,7 +40,9 @@ Optional env for the dashboard **watchlist** (SQLite, separate from the TTL cach
 
 - v1 uses **yfinance** for market data and recent **headlines** (when available).
 - Headline polarity uses **VADER** (`vaderSentiment`) on text from **two lanes**: ticker news surfaced by **yfinance** plus **Google News RSS** queries for `{SYMBOL} stock` (distinct outlets, pooled so one pathway cannot dominate silently). Results are fused before the **synthesizer** blends headline probability with the technical stream.
-- Alpha Vantage or other APIs can augment or replace headline sources later.
-- **Daily movers dropdown** (`GET /market/daily-leaders`): ranks symbols by yesterday→latest daily % move within a **curated large-cap universe** (~30 liquid US names—not the full exchange). Profiles use `longBusinessSummary` from yfinance when available.
-- The app avoids imperative language and includes a “not financial advice” disclaimer in UI/report output.
 
+- Alpha Vantage or other APIs can supplement or replace headline sources as a fallback later.
+
+- **Daily movers dropdown** (`GET /market/daily-leaders`): ranks symbols by yesterday→latest daily % move within a **curated large-cap universe** (~30 liquid US names—not the full exchange). Profiles use `longBusinessSummary` from yfinance when available.
+
+- The app avoids imperative language and includes a “not financial advice” disclaimer in UI/report output.

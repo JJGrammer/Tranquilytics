@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import yfinance as yf
+from yfinance.exceptions import YFRateLimitError
 
 from app.schemas.market import DailyLeaderRow
 
@@ -29,6 +30,8 @@ def _day_change_pct(symbol: str) -> tuple[str, float | None]:
         close = h["Close"]
         pct = float((close.iloc[-1] / close.iloc[-2] - 1.0) * 100.0)
         return symbol, pct
+    except YFRateLimitError:
+        raise
     except Exception:
         return symbol, None
 
@@ -48,6 +51,8 @@ def _describe_symbol(symbol: str) -> tuple[str | None, str | None]:
         blob = info.get("longBusinessSummary") or ""
         desc = _truncate(blob) if blob else None
         return (str(name) if name else None, desc)
+    except YFRateLimitError:
+        raise
     except Exception:
         return None, None
 

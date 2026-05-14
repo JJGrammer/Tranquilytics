@@ -48,9 +48,20 @@ async function jsonFetch<T>(
     } catch {
       /* ignore */
     }
+    let parsedDetail = ''
+    try {
+      const j = JSON.parse(detail) as { detail?: string }
+      if (typeof j.detail === 'string' && j.detail.trim()) parsedDetail = j.detail.trim()
+    } catch {
+      /* not JSON */
+    }
+    if (parsedDetail && res.status === 503) {
+      throw new Error(parsedDetail)
+    }
+    const tail = `HTTP ${res.status} ${res.statusText}.${proxyHint}`.trim()
     throw new Error(
-      (detail && detail.length < 280 ? `${detail.trim()} ` : '') +
-        `HTTP ${res.status} ${res.statusText}.${proxyHint}`.trim(),
+      (parsedDetail ? `${parsedDetail} ` : detail && detail.length < 280 ? `${detail.trim()} ` : '') +
+        tail,
     )
   }
   return res.json() as Promise<T>
