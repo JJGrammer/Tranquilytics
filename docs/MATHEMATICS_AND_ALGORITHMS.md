@@ -17,8 +17,8 @@ This document describes **modeling and policy math**, not HTTP routes or deploym
 | \(h\) | Forward **horizon** in trading days: **5** (short) or **30** (long) in production preview/report. |
 | \(\mathbf{x}_t\) | Vector of **technical features** on day \(t\) (10 columns; see §3). |
 | \(y_t\) | Binary **label**: 1 if forward return over \(h\) days is positive, else 0 (see §4). |
-| \(P_{\text{tech}}\) | Technical **probability of “up”** from logistic regression (`fit_predict_prob_up`). |
-| \(P_{\text{sent}}\) | Headline **bullish-aligned probability** in \([0,1]\) from VADER pooling. |
+| \(P_{sub{tech}}\) | Technical **probability of “up”** from logistic regression (`fit_predict_prob_up`). |
+| \(P_{\syb{sent}}\) | Headline **bullish-aligned probability** in \([0,1]\) from VADER pooling. |
 | \(p\) | **Blended** probability passed to the tone policy (`prob_up` in `decide`). |
 | \(\mu\) | **Sentiment-nudged expected fractional return** over the horizon (`expected_return` in `decide`). |
 | \(\sigma\) | **Daily return volatility** estimate (`volatility` in `decide`; not annualized). |
