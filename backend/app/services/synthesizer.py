@@ -24,6 +24,15 @@ def blend_probability(
     weight_technical: float,
     weight_sentiment: float,
 ) -> float:
+    """
+    Convex combination of two calibrated probabilities in ``[0, 1]``.
+
+    Weights are clamped to ``[0, 1]``, normalized to sum to 1, then:
+
+        w'_t P_tech + w'_s P_sent
+
+    If both weights sanitize to zero, returns ``technical_prob`` unchanged.
+    """
     w_t = max(0.0, min(1.0, weight_technical))
     w_s = max(0.0, min(1.0, weight_sentiment))
     s = w_t + w_s

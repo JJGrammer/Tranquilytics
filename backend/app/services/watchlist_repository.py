@@ -34,6 +34,7 @@ def default_state_db_path() -> str:
 
 
 def normalize_symbol(raw: str) -> str:
+    """Uppercase strip; must match ``_SYMBOL_RE`` or raises ``ValueError``."""
     s = (raw or "").strip().upper()
     if not _SYMBOL_RE.match(s):
         raise ValueError("invalid symbol format")
@@ -62,6 +63,8 @@ class WatchlistRepository(ABC):
 
 
 class SqliteWatchlistRepository(WatchlistRepository):
+    """SQLite implementation keyed by ``(user_id, symbol)`` with capped list length."""
+
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path or default_state_db_path()
         self._init()
@@ -93,6 +96,7 @@ class SqliteWatchlistRepository(WatchlistRepository):
             con.commit()
 
     def list_items(self, *, user_id: str) -> list[WatchlistRow]:
+        """Ordered WatchlistRow list for ``user_id`` (blank ids map to ``local``)."""
         uid = user_id.strip() or DEFAULT_LOCAL_USER_ID
         with closing(self._connect()) as con:
             cur = con.execute(
@@ -117,6 +121,7 @@ class SqliteWatchlistRepository(WatchlistRepository):
         return out
 
     def add(self, *, user_id: str, symbol: str) -> WatchlistRow:
+        """Append symbol at next ``sort_order``; raises ``ValueError`` if full or duplicate."""
         sym = normalize_symbol(symbol)
         uid = user_id.strip() or DEFAULT_LOCAL_USER_ID
         now = datetime.now(tz=timezone.utc).isoformat()
@@ -151,6 +156,7 @@ class SqliteWatchlistRepository(WatchlistRepository):
         return WatchlistRow(symbol=sym, sort_order=next_order, added_at=datetime.fromisoformat(now))
 
     def remove(self, *, user_id: str, symbol: str) -> bool:
+        """Delete row if present; returns whether any row was removed."""
         sym = normalize_symbol(symbol)
         uid = user_id.strip() or DEFAULT_LOCAL_USER_ID
         with closing(self._connect()) as con:

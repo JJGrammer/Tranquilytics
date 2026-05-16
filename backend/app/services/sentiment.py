@@ -19,6 +19,7 @@ LABEL_THRESHOLD = 0.028
 
 
 def _get_analyzer() -> SentimentIntensityAnalyzer:
+    """Lazy singleton; loads VADER lexicon files once per process."""
     global _analyzer
     if _analyzer is None:
         _analyzer = SentimentIntensityAnalyzer()
@@ -37,12 +38,14 @@ class SentimentSnapshot:
 
 
 def _per_headline_direction(scores: dict) -> float:
+    """Blend compound score with (pos − neg) spread into one scalar per headline."""
     c = float(scores["compound"])
     edge = float(scores["pos"]) - float(scores["neg"])
     return float((c + edge) / 2.0)
 
 
 def _label_from_blended(blended: float) -> str:
+    """Map pooled directional scalar to Bullish / Bearish / Neutral using ``LABEL_THRESHOLD``."""
     if blended >= LABEL_THRESHOLD:
         return "Bullish"
     if blended <= -LABEL_THRESHOLD:
@@ -51,6 +54,7 @@ def _label_from_blended(blended: float) -> str:
 
 
 def _rows_to_snapshot(rows: list[dict], *, feed_breakdown: dict[str, str] | None = None) -> SentimentSnapshot:
+    """Aggregate scored headline rows into mean compounds + mapped bullish probability ``≈ (blend+1)/2``."""
     if not rows:
         return SentimentSnapshot(
             0,

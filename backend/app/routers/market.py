@@ -52,7 +52,7 @@ def daily_picks(
     Default universe is S&P 500; responses are cached ~24h per universe and focus.
     """
     syms: tuple[str, ...] = SP500_TICKERS if universe == "sp500" else tuple(CURATED_LARGE_CAP_UNIVERSE)
-    cache_key = f"market:daily_picks:{universe}:{focus}:v4"
+    cache_key = f"market:daily_picks:{universe}:{focus}:v5"
     cache = SqliteCache()
     if not refresh:
         hit = cache.get(cache_key)
@@ -60,10 +60,16 @@ def daily_picks(
             return DailyPicksResponse.model_validate(hit.value)
 
     workers = 6 if len(syms) > 120 else 5
-    rows, as_of = compute_daily_model_picks(syms, max_workers=workers, focus=focus)
+    rows, as_of = compute_daily_model_picks(
+        syms,
+        max_workers=workers,
+        focus=focus,
+        bypass_preview_cache=refresh,
+    )
     horizon = "short-term" if focus == "short" else "long-term"
     note = (
-        f"Universe {universe}: scanned {len(syms)} symbols with the same stack as /ticker/preview. "
+        f"Universe {universe}: scanned {len(syms)} symbols with a faster bulk preview "
+        f"(Yahoo headlines only; Google RSS and company blurbs skipped). "
         f"Includes {horizon} Safer Buy, or Buy when interpreted risk is Low. "
         "First uncached S&P 500 run can take many minutes. Exploratory only—not financial advice."
     )

@@ -37,6 +37,10 @@ from app.services.synthesizer import (
 
 
 def _unique_headline_detail_rows(a: list[dict], b: list[dict], limit: int = 10) -> list[dict]:
+    """
+    Merge two headline lists (e.g. Yahoo + RSS), dedupe by ``headline_fingerprint``,
+    preserve order of ``a`` first, cap length for citation payloads.
+    """
     seen: set[str] = set()
     out: list[dict] = []
     for row in a + b:
@@ -115,21 +119,60 @@ def _horizon_reasoning(
 
 
 class ReportService:
+    """
+    Orchestrate previews and cached narrative reports.
+
+    Owns ``SqliteCache`` rows for serialized previews (~20 min TTL; keyed by symbol + screen mode)
+    and full reports (separate keys).
+    """
+    _PREVIEW_CACHE_TTL_SECONDS = 20 * 60
+
     def __init__(self) -> None:
         self.cache = SqliteCache()
         self.md = MarketDataService()
 
-    def preview(self, symbol: str) -> PreviewResponse:
+    def _preview_cache_key(self, sym: str, *, screen_mode: bool) -> str:
+        return f"preview:v3:{sym}:scr={int(screen_mode)}"
+
+    def preview(
+        self,
+        symbol: str,
+        *,
+        bypass_cache: bool = False,
+        screen_mode: bool = False,
+    ) -> PreviewResponse:
+        """
+        Quick tones + risk. ``screen_mode=True`` skips Google RSS and company blurb for faster
+        bulk scans (results can differ slightly from the dashboard preview).
+
+        Cached ~20m per (symbol, screen_mode) unless ``bypass_cache=True``.
+
+        Cache is consulted **before** re-validating with Yahoo so repeat hits avoid I/O;
+        stale rows expire via TTL (symbols can rarely delist within the window).
+        """
+        sym = symbol.upper().strip()
+        if not sym:
+            return PreviewResponse(valid=False, symbol="")
+
+        cache_key = self._preview_cache_key(sym, screen_mode=screen_mode)
+        if not bypass_cache:
+            hit = self.cache.get(cache_key)
+            if hit is not None:
+                return PreviewResponse.model_validate(hit.value)
+
         info = self.md.try_get_ticker_info(
             symbol,
             include_company_description=False,
         )
         if info is None:
-            return PreviewResponse(valid=False, symbol=symbol.upper().strip())
+            return PreviewResponse(valid=False, symbol=sym)
 
-        sym = symbol.upper().strip()
         yf_news = self.md.get_news_items(sym)
-        rss_news = fetch_google_news_rss(sym, cache=self.cache)
+        rss_news = (
+            []
+            if screen_mode
+            else fetch_google_news_rss(sym, cache=self.cache)
+        )
         news_merged = dedupe_news(anchor=yf_news, extra=rss_news)
         sent_short, sent_long, _horizon_diag = analyze_dual_horizon_sentiment(
             news_merged,
@@ -170,11 +213,17 @@ class ReportService:
         risk = risk_level_from_volatility(vol)
         day_chg = _latest_session_change_pct(prices)
 
-        return PreviewResponse(
+        blurb = (
+            None
+            if screen_mode
+            else self.md.try_get_company_blurb(sym, cache=self.cache)
+        )
+
+        out = PreviewResponse(
             valid=True,
             symbol=sym,
             name=info.get("name"),
-            description=info.get("description"),
+            description=blurb,
             exchange=info.get("exchange"),
             currency=info.get("currency"),
             change_pct_day=day_chg,
@@ -186,6 +235,12 @@ class ReportService:
             short_term=HorizonPreview(tone=short_dec.tone, confidence=float(short_dec.confidence)),
             long_term=HorizonPreview(tone=long_dec.tone, confidence=float(long_dec.confidence)),
         )
+        self.cache.set(
+            cache_key,
+            out.model_dump(mode="json"),
+            ttl_seconds=self._PREVIEW_CACHE_TTL_SECONDS,
+        )
+        return out
 
     def generate(self, symbol: str, include_citations: bool) -> ReportResponse:
         sym = symbol.upper().strip()

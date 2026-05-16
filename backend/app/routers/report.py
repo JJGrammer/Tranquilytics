@@ -9,8 +9,7 @@ Primary goal:
   reasoning, risk, and citations.
 
 Notes:
-- v1 intentionally prefers a score-first pipeline (probability/confidence + expected move)
-  and then maps to advice via a policy layer.
+- v1 prefers a score-first pipeline (probability/confidence + expected move), then maps to advice via ``advice_policy.decide``.
 """
 
 from fastapi import APIRouter, HTTPException

@@ -124,3 +124,38 @@ def test_try_get_ticker_info_blocks_quote_type_before_history(
 
     monkeypatch.setattr("app.services.market_data.yf.Ticker", FakeTicker)
     assert MarketDataService().try_get_ticker_info("XXX") is None
+
+
+def test_try_get_company_blurb_truncates_long_business_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeTicker:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        @property
+        def info(self) -> dict:
+            return {"longBusinessSummary": "  We make phones.\n" + ("word " * 120)}
+
+    monkeypatch.setattr("app.services.market_data.yf.Ticker", FakeTicker)
+    out = MarketDataService().try_get_company_blurb("ZZZ")
+    assert out is not None
+    assert "We make phones" in out
+    assert len(out) <= 321
+
+
+def test_try_get_company_blurb_swallows_yahoo_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yfinance.exceptions import YFRateLimitError
+
+    class FakeTicker:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        @property
+        def info(self) -> dict:
+            raise YFRateLimitError()
+
+    monkeypatch.setattr("app.services.market_data.yf.Ticker", FakeTicker)
+    assert MarketDataService().try_get_company_blurb("AAPL") is None

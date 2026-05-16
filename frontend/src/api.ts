@@ -17,6 +17,10 @@ export function isAbortError(e: unknown): boolean {
   return e instanceof Error && e.name === 'AbortError'
 }
 
+/**
+ * Typed JSON GET/POST helper: prefixes `base` (dev proxy `/api` or `VITE_API_BASE`).
+ * Throws on network failure; on HTTP errors includes status text and optional JSON `detail`.
+ */
 async function jsonFetch<T>(
   path: string,
   init?: RequestInit,
@@ -33,7 +37,7 @@ async function jsonFetch<T>(
   } catch (e) {
     if (isAbortError(e)) throw e
     throw new Error(
-      'Cannot reach the API server. Start the backend: uvicorn app.main:app --reload --port 8000 (run from backend/)',
+      'Cannot reach the API server. From backend/, start it: python run.py --reload --port 8000 (or: uvicorn app.main:app --port 8000)',
     )
   }
 

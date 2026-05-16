@@ -19,6 +19,8 @@ import pandas as pd
 import yfinance as yf
 from yfinance.exceptions import YFRateLimitError
 
+from app.services.cache import SqliteCache
+
 # Reject obvious non-single-name screens when Yahoo exposes quoteType.
 _BLOCKED_QUOTE_TYPES = frozenset(
     {
@@ -208,6 +210,48 @@ class MarketDataService:
             raise
         except Exception:
             return None
+
+    def try_get_company_blurb(
+        self,
+        symbol: str,
+        *,
+        cache: SqliteCache | None = None,
+        ttl_seconds: int = 86_400,
+    ) -> str | None:
+        """
+        Fetch ``longBusinessSummary`` via yfinance ``.info()`` (slower, rate-limit prone).
+
+        Split from ``try_get_ticker_info`` so ticker validation and core preview stay on
+        the lighter path; if this call fails or is throttled, return ``None`` without
+        treating the symbol as invalid.
+        """
+        sym = (symbol or "").strip().upper()
+        if not sym:
+            return None
+
+        cache_key = f"company_blurb:{sym}"
+        if cache is not None:
+            hit = cache.get(cache_key)
+            if hit is not None:
+                raw = hit.value.get("blurb")
+                if isinstance(raw, str) and raw.strip():
+                    return raw.strip()
+                return None
+
+        try:
+            t = yf.Ticker(sym)
+            full = getattr(t, "info", None) or {}
+            raw_summary = full.get("longBusinessSummary")
+            blob = raw_summary.strip() if isinstance(raw_summary, str) else ""
+            out = _truncate_company_summary(blob) if blob else None
+        except YFRateLimitError:
+            return None
+        except Exception:
+            return None
+
+        if cache is not None:
+            cache.set(cache_key, {"blurb": out or ""}, ttl_seconds=ttl_seconds)
+        return out
 
     def get_ohlc_history(
         self,

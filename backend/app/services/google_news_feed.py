@@ -23,6 +23,7 @@ _GOOGLE_RSS = "https://news.google.com/rss/search"
 
 
 def _parse_pub_date(raw: str | None) -> datetime | None:
+    """Parse RFC 2822-style ``pubDate`` strings from RSS into timezone-aware UTC."""
     if not raw:
         return None
     try:
@@ -35,6 +36,7 @@ def _parse_pub_date(raw: str | None) -> datetime | None:
 
 
 def _publisher_from_google_title(title: str) -> str:
+    """Infer outlet label from Google's ``Title - Publisher`` suffix convention."""
     # Google News titles often end with " - Reuters" etc.
     if " - " in title:
         return title.rsplit(" - ", 1)[-1].strip()
@@ -45,6 +47,11 @@ _alnum_re = re.compile(r"[^a-z0-9]+")
 
 
 def headline_fingerprint(title: str) -> str:
+    """
+    Normalize title text for dedupe (lowercase, strip outlet suffix, alnum-only prefix).
+
+    Not cryptographic — collisions across distinct stories are possible but rare for headlines.
+    """
     t = title.lower().strip()
     if " - " in t:
         t = t.rsplit(" - ", 1)[0].strip()
@@ -77,6 +84,12 @@ def fetch_google_news_rss(
     limit: int = 14,
     ttl_seconds: int = 600,
 ) -> list[dict]:
+    """
+    Fetch Google News RSS for ``{SYMBOL} stock``, parse ``item`` nodes to dict rows.
+
+    On failure or empty feed, writes an empty cache entry when ``cache`` is set so callers
+    do not hammer the endpoint; returns ``[]``.
+    """
     sym = (symbol or "").strip().upper()
     if not sym:
         return []

@@ -58,6 +58,7 @@ class SqliteCache:
             con.execute("CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache(expires_at)")
 
     def get(self, key: str) -> CacheEntry | None:
+        """Return a live cache row or ``None`` if missing/expired (expired rows are deleted)."""
         now = datetime.now(tz=timezone.utc)
         with closing(self._connect()) as con:
             row = con.execute(
@@ -80,6 +81,7 @@ class SqliteCache:
         )
 
     def set(self, key: str, value: dict[str, Any], ttl_seconds: int) -> CacheEntry:
+        """Upsert JSON-serializable ``value`` with absolute expiry computed from ``ttl_seconds``."""
         now = datetime.now(tz=timezone.utc)
         entry = CacheEntry(
             key=key,
@@ -108,6 +110,7 @@ class SqliteCache:
         return entry
 
     def delete(self, key: str) -> None:
+        """Best-effort single-key eviction (used when TTL elapsed on read)."""
         with closing(self._connect()) as con:
             con.execute("DELETE FROM cache WHERE key = ?", (key,))
 

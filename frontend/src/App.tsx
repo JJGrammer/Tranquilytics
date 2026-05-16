@@ -25,6 +25,13 @@ import {
   readStoredColorMode,
   type ColorMode,
 } from './theme'
+import {
+  formatSynthesizerRuntimeLines,
+  getConfidenceExplanationSections,
+  getSynthesizerExplanationSections,
+  type ExplanationSection,
+} from './analysisExplanations'
+import { ExplanationModal } from './components/ExplanationModal'
 
 /** Full S&P scan can exceed this; we abort client-side so the UI never sticks on “Scanning…”. */
 const SCREENER_FETCH_TIMEOUT_MS = 12 * 60 * 1000
@@ -175,17 +182,40 @@ function citationSourceWithLinks(source: string): ReactNode {
   })
 }
 
-function ConfidenceBar({ value }: { value: number }) {
+function ConfidenceBar({
+  value,
+  onExplain,
+  explainAriaLabel = 'How confidence is calculated',
+}: {
+  value: number
+  onExplain?: () => void
+  explainAriaLabel?: string
+}) {
   const pct = Math.round(Math.min(1, Math.max(0, value)) * 100)
   return (
-    <div
-      className="h-1.5 flex-1 max-w-[120px] overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
-      title={`${pct}%`}
-    >
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      {onExplain ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault()
+            onExplain()
+          }}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-sky-300/80 text-[11px] font-semibold text-emerald-800 transition hover:bg-sky-100 dark:border-slate-600 dark:text-cyan-400 dark:hover:bg-slate-800"
+          aria-label={explainAriaLabel}
+        >
+          ?
+        </button>
+      ) : null}
       <div
-        className="h-full rounded-full bg-emerald-600/75 dark:bg-cyan-500/70"
-        style={{ width: `${pct}%` }}
-      />
+        className="h-1.5 min-w-0 flex-1 max-w-[120px] overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
+        title={`${pct}%`}
+      >
+        <div
+          className="h-full rounded-full bg-emerald-600/75 dark:bg-cyan-500/70"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
     </div>
   )
 }
@@ -280,6 +310,12 @@ export default function App() {
   const [loadingReport, setLoadingReport] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [colorMode, setColorMode] = useState<ColorMode>(() => readStoredColorMode())
+
+  const [explanationModal, setExplanationModal] = useState<{
+    title: string
+    sections: ExplanationSection[]
+    extraNote?: string
+  } | null>(null)
 
   useLayoutEffect(() => {
     applyColorModeToDocument(colorMode)
@@ -832,7 +868,16 @@ export default function App() {
               <div className="mt-1 flex items-center gap-2">
                 <span className={toneBadgeClass(shortTone)}>{shortTone}</span>
                 {previewConf ? (
-                  <ConfidenceBar value={previewConf.short} />
+                  <ConfidenceBar
+                    value={previewConf.short}
+                    onExplain={() =>
+                      setExplanationModal({
+                        title: 'Short-term confidence',
+                        sections: getConfidenceExplanationSections(),
+                      })
+                    }
+                    explainAriaLabel="Explain short-term confidence"
+                  />
                 ) : null}
               </div>
             </div>
@@ -841,7 +886,16 @@ export default function App() {
               <div className="mt-1 flex items-center gap-2">
                 <span className={toneBadgeClass(longTone)}>{longTone}</span>
                 {previewConf ? (
-                  <ConfidenceBar value={previewConf.long} />
+                  <ConfidenceBar
+                    value={previewConf.long}
+                    onExplain={() =>
+                      setExplanationModal({
+                        title: 'Long-term confidence',
+                        sections: getConfidenceExplanationSections(),
+                      })
+                    }
+                    explainAriaLabel="Explain long-term confidence"
+                  />
                 ) : null}
               </div>
             </div>
@@ -949,7 +1003,27 @@ export default function App() {
                 </span>
               </p>
               <div className="mt-3 rounded-md border border-sky-200/80 bg-white/90 p-3 text-xs text-slate-700 dark:border-slate-700/70 dark:bg-slate-950/50 dark:text-slate-400">
-                <p className="font-medium text-slate-800 dark:text-slate-300">Technical + sentiment synthesizer</p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium text-slate-800 dark:text-slate-300">
+                    Technical + sentiment synthesizer
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExplanationModal({
+                        title: 'Short-term synthesizer',
+                        sections: getSynthesizerExplanationSections('short', {
+                          technical: report.short_term.synthesis.technical_weight,
+                          sentiment: report.short_term.synthesis.sentiment_weight,
+                        }),
+                        extraNote: formatSynthesizerRuntimeLines(report.short_term.synthesis),
+                      })
+                    }
+                    className="shrink-0 text-[11px] font-medium text-emerald-800 underline decoration-emerald-500/40 underline-offset-2 hover:text-emerald-900 dark:text-cyan-400/90 dark:hover:text-cyan-300"
+                  >
+                    How it works
+                  </button>
+                </div>
                 <ul className="mt-2 list-inside list-disc space-y-0.5 marker:text-slate-500 dark:marker:text-slate-600">
                   <li>
                     Technical model P(up) ≈{' '}
@@ -986,7 +1060,27 @@ export default function App() {
                 </span>
               </p>
               <div className="mt-3 rounded-md border border-sky-200/80 bg-white/90 p-3 text-xs text-slate-700 dark:border-slate-700/70 dark:bg-slate-950/50 dark:text-slate-400">
-                <p className="font-medium text-slate-800 dark:text-slate-300">Technical + sentiment synthesizer</p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium text-slate-800 dark:text-slate-300">
+                    Technical + sentiment synthesizer
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExplanationModal({
+                        title: 'Long-term synthesizer',
+                        sections: getSynthesizerExplanationSections('long', {
+                          technical: report.long_term.synthesis.technical_weight,
+                          sentiment: report.long_term.synthesis.sentiment_weight,
+                        }),
+                        extraNote: formatSynthesizerRuntimeLines(report.long_term.synthesis),
+                      })
+                    }
+                    className="shrink-0 text-[11px] font-medium text-emerald-800 underline decoration-emerald-500/40 underline-offset-2 hover:text-emerald-900 dark:text-cyan-400/90 dark:hover:text-cyan-300"
+                  >
+                    How it works
+                  </button>
+                </div>
                 <ul className="mt-2 list-inside list-disc space-y-0.5 marker:text-slate-500 dark:marker:text-slate-600">
                   <li>
                     Technical model P(up) ≈{' '}
@@ -1065,11 +1159,6 @@ export default function App() {
               {watchlistLoading ? '…' : `${watchlistItems.length} / ${watchlistMax}`} symbols
             </p>
           </div>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-600">
-            Saved on this machine (SQLite). Add symbols only after a successful <strong className="font-medium text-slate-700 dark:text-slate-500">Look up</strong> — use{' '}
-            <strong className="font-medium text-slate-700 dark:text-slate-500">Add to watchlist</strong> in the preview card. Same API supports a future{' '}
-            <code className="rounded bg-sky-100/80 px-1 text-[11px] dark:bg-slate-800">user_id</code> header for hosted accounts.
-          </p>
           {watchlistErr ? (
             <p className="mt-2 text-xs text-rose-600 dark:text-rose-400" role="alert">
               {watchlistErr}
@@ -1312,6 +1401,13 @@ export default function App() {
       ) : null}
           </div>
       </div>
+      <ExplanationModal
+        open={explanationModal !== null}
+        title={explanationModal?.title ?? ''}
+        sections={explanationModal?.sections ?? []}
+        extraNote={explanationModal?.extraNote}
+        onClose={() => setExplanationModal(null)}
+      />
     </div>
   )
 }

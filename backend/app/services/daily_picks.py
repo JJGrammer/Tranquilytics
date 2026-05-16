@@ -11,6 +11,7 @@ from app.schemas.market import DailyPickRow
 from app.schemas.preview import PreviewResponse
 from app.services.advice_policy import BUY, SAFE_BUY
 from app.services.report_service import ReportService
+from yfinance.exceptions import YFRateLimitError
 
 PickFocus = Literal["short", "long"]
 
@@ -76,10 +77,27 @@ def pick_row_from_preview(
     )
 
 
-def _preview_worker(symbol: str, focus: PickFocus) -> DailyPickRow | None:
+def _preview_worker(
+    symbol: str,
+    focus: PickFocus,
+    *,
+    bypass_preview_cache: bool,
+) -> DailyPickRow | None:
+    """
+    Run one ``preview(..., screen_mode=True)`` and map to a pick row if policy matches.
+
+    Swallows per-symbol failures so one bad ticker does not abort the scan.
+    **Does not** swallow Yahoo rate limits — those propagate so the API can return 503.
+    """
     try:
-        p = ReportService().preview(symbol)
+        p = ReportService().preview(
+            symbol,
+            bypass_cache=bypass_preview_cache,
+            screen_mode=True,
+        )
         return pick_row_from_preview(p, focus=focus)
+    except YFRateLimitError:
+        raise
     except Exception:
         return None
 
@@ -89,16 +107,34 @@ def compute_daily_model_picks(
     *,
     max_workers: int = 5,
     focus: PickFocus = "short",
+    bypass_preview_cache: bool = False,
 ) -> tuple[list[DailyPickRow], datetime]:
     """
     Run preview across ``symbols``; keep rows matching pick policy for ``focus``.
     Large universes (e.g. S&P 500) can take many minutes on a cold cache.
+
+    Uses ``screen_mode`` previews (no Google RSS / company blurb) plus per-symbol cache ~20m
+    unless ``bypass_preview_cache=True``.
+
+    Raises:
+        YFRateLimitError: If Yahoo throttles any worker thread — surfaces to FastAPI as 503.
     """
     picks: list[DailyPickRow] = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(_preview_worker, sym, focus) for sym in symbols]
+        futures = [
+            pool.submit(
+                _preview_worker,
+                sym,
+                focus,
+                bypass_preview_cache=bypass_preview_cache,
+            )
+            for sym in symbols
+        ]
         for fut in as_completed(futures):
-            row = fut.result()
+            try:
+                row = fut.result()
+            except YFRateLimitError:
+                raise
             if row is not None:
                 picks.append(row)
 

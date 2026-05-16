@@ -53,7 +53,12 @@ def fit_predict_prob_up(
     label: pd.Series,
 ) -> float:
     """
-    Train a simple time-series-aware classifier and return prob_up for the latest row.
+    Train a simple time-series-aware classifier and return ``P(up)`` for the **latest** row.
+
+    Uses ``StandardScaler`` + ``LogisticRegression`` with optional ``CalibratedClassifierCV``
+    (isotonic, ``TimeSeriesSplit``). Falls back to uncalibrated fit if calibration raises
+    ``ValueError`` (degenerate folds). If too few rows or a single class, returns a clipped
+    historical positive-rate baseline instead of fitting.
     """
     cols = _feature_columns()
     X = feat_df[cols].replace([np.inf, -np.inf], np.nan).dropna()
@@ -105,6 +110,6 @@ def estimate_expected_return(feat_df: pd.DataFrame, horizon_days: int) -> float:
 
 
 def estimate_volatility(feat_df: pd.DataFrame) -> float:
+    """Sample standard deviation of daily returns over the last ~20 valid rows (not annualized)."""
     vol = feat_df["ret_1d"].dropna().tail(20).std()
     return float(vol) if pd.notna(vol) else 0.0
-

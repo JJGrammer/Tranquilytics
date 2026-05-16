@@ -23,7 +23,11 @@ class AdviceDecision:
 
 
 def decide(prob_up: float, expected_return: float, volatility: float) -> AdviceDecision:
-    """Score-first mapping: extremes first, then intermediate buy/sell, else neutral."""
+    """Map blended probability / heuristic return / daily vol to a tone + UI confidence.
+
+    Rules branch in order: Safer Buy → Sell Soon → Buy → Sell → Neutral (see module constants).
+    ``buffer`` scales with volatility so thresholds widen slightly in noisy names.
+    """
     buffer = max(0.005, min(0.03, volatility * 0.75))
     edge_buffer = buffer * 1.35
 
